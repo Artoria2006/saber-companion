@@ -5,8 +5,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from speech import SAMPLE, VOICES
 
 ROOT = Path(__file__).resolve().parent
 
@@ -90,12 +91,13 @@ def install_dashboard(app, engine, config, quiet, tz):
             sessions.append({k: state[k] for k in ("key", "bot_id", "user_id", "group_id", "persona", "proactive", "last_user", "last_attempt")} |
                             {"history_count": len(state["history"]), "schedule": schedule(engine, state, now, quiet),
                              "current": engine.current.get(state["key"]), "is_companion": state["user_id"] == companion and state["group_id"] is None,
-                             "stickers_enabled": prefs.get("stickers_enabled", True)})
+                             "stickers_enabled": prefs.get("stickers_enabled", True), "voice_enabled": prefs.get("voice_enabled", True)})
         return {"now": now.timestamp(), "timezone": "Asia/Shanghai", "connected": bool(engine.online_bots),
                 "paused": engine.store.preference("paused", False), "queue_size": engine.queue.qsize(),
                 "queue_limit": config["chat"]["queue_size"], "next_check_at": engine.next_check_at,
                 "sessions": sessions, "personas": list(config["personas"]), "model": config["model"]["model"],
-                "search_enabled": config["proactive"]["search_enabled"], "max_image_bytes": config["stickers"]["max_bytes"]}
+                "search_enabled": config["proactive"]["search_enabled"], "max_image_bytes": config["stickers"]["max_bytes"],
+                "voice": engine.speech.settings(), "voices": VOICES}
 
     @router.get("/activities", dependencies=[Depends(authenticated)])
     async def activities(session: str = "", before: int = 0):
@@ -122,14 +124,29 @@ def install_dashboard(app, engine, config, quiet, tz):
                     raise ValueError("只能将私聊账号设为伴侣")
                 engine.store.set_preference("companion_qq", state["user_id"])
                 engine.record(key, "control", "done", "已将此私聊账号设为伴侣")
-            elif action in ("test", "sticker_test"):
+            elif action == "voice_settings":
+                engine.speech.update(values)
+                engine.record("", "control", "done", "已更新中文语音设置")
+            elif action in ("test", "sticker_test", "voice_test"):
                 checked(key)
-                engine.enqueue_manual(key, "proactive" if action == "test" else "sticker", str(values.get("sticker", "hug")))
+                engine.enqueue_manual(key, {"test":"proactive", "sticker_test":"sticker", "voice_test":"voice"}[action], str(values.get("sticker", "hug")))
             else:
                 raise ValueError("未知操作")
         except (ValueError, KeyError) as exc:
             raise HTTPException(400, str(exc) if isinstance(exc, ValueError) else "QQ 尚未连接") from None
         return {"ok": True}
+
+    @router.post("/voice/preview", dependencies=[Depends(authenticated)])
+    async def voice_preview():
+        if time.time() - engine.speech.preview_at < 10:
+            raise HTTPException(429, "请等待十秒再试听")
+        engine.speech.preview_at = time.time()
+        try:
+            audio = await engine.speech.synthesize(SAMPLE)
+        except Exception as exc:
+            engine.record("", "speech", "failed", "管理面板语音试听失败", {"type":type(exc).__name__})
+            raise HTTPException(503, "语音合成暂不可用，请检查 voice.enabled、网络与 [voice] 日志") from None
+        return Response(audio, media_type="audio/mpeg", headers={"Cache-Control":"no-store", "X-Content-Type-Options":"nosniff"})
 
     @router.get("/memories", dependencies=[Depends(authenticated)])
     async def memories(session: str):
@@ -190,5 +207,5 @@ def install_dashboard(app, engine, config, quiet, tz):
     async def index():
         return FileResponse(ROOT / "web" / "index.html", headers={
             "Cache-Control": "no-store", "X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": "default-src 'self'; img-src 'self' blob: data:; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'",
+            "Content-Security-Policy": "default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'",
         })

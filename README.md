@@ -131,6 +131,15 @@ Token 填 `server.access_token` 原文；不要加 `Bearer ` 前缀。重连间�
 | stickers.upload_dir | data/stickers | 面板上传的自定义表情目录，保存在本机并跨重启保留 |
 | stickers.max_bytes | 1048576 | 单张图片上限 1 MiB，支持 PNG、JPEG、GIF、WebP；可设置 1024—5242880 字节 |
 | stickers.min_interval_seconds | 300.0 | 同一会话自动配表情至少间隔五分钟；手动表情测试可跳过这个冷却 |
+| voice.enabled | false | 开启在线中文语音合成；本机已开启，公共示例默认关闭 |
+| voice.voice | zh-CN-XiaoxiaoNeural | 晓晓中文女声；也可选 zh-CN-XiaoyiNeural（晓伊） |
+| voice.rate_percent | -8 | 语速百分比调整，默认减慢 8%，允许 -50—25 |
+| voice.pitch_hz | -2 | 音调 Hz 调整，默认降低 2 Hz，允许 -20—20 |
+| voice.proactive_probability | 0.25 | 纯闲聊主动回复使用语音的概率，允许 0—1；含阅读来源的分享仍发文字 |
+| voice.min_interval_seconds | 3600.0 | 同一私聊的自动语音至少间隔一小时，明确请求和测试不受此间隔限制 |
+| voice.max_chars | 180 | 最长合成正文字符数，允许 40—300；超出时退回完整文字 |
+| voice.max_bytes | 2097152 | 合成音频大小上限 2 MiB，允许 1024—5242880 字节 |
+| voice.timeout_seconds | 25.0 | 合成总超时秒数，包含等待并发名额的时间；失败不重试，退回文字 |
 
 ## 5. 使用与边界
 
@@ -218,3 +227,17 @@ Docker 启动后打开 **http://127.0.0.1:8099/panel/**，使用 config.toml 的
 上传表情填写名称并选择 PNG、JPEG、GIF 或 WebP，默认单张最多 1 MiB、最多 1600 万像素、动画不超过 200 帧；整个表情库最多 60 张。上传文件和索引写入 data/stickers，不进入 Git。只能发送库中已有图片，不能让模型下载任意图片。内置图及绘图脚本见 assets/stickers 和 scripts/make_stickers.py；已有 PNG 可直接运行，重新绘制时才需要本机字体。
 
 升级后执行 `docker compose up -d --build`；只重建机器人并保留当前 NapCat 登录时，执行 `docker compose build bot`，再执行 `docker compose up -d --no-deps bot`。重启会取消尚未完成的内存队列任务，已保存的日记、记忆、偏好和自定义表情会保留。
+
+## 11. 中文语音回复
+
+将 `[voice]` 的 `enabled` 设为 `true`，执行 `docker compose build bot` 后执行 `docker compose up -d --no-deps bot`。无需额外 API Key，也无需安装 Edge 浏览器；使用固定版本 edge-tts 7.3.1 调用微软 Edge 在线朗读服务。它是社区维护的接入方式，不是具有可用性保证的付费语音 API；服务变动或网络阻断时可能失败，项目会退回文字。参考 [edge-tts 上游说明](https://github.com/rany2/edge-tts)。
+
+私聊说“想听你的声音”“用语音回复我”，会把模型本轮生成的短回复合成为 QQ 语音条；平时普通来信仍用文字。纯闲聊的主动回复默认有 25% 概率使用语音，自动语音至少间隔一小时，继续遵守主动聊天的名额、空闲门槛和安静时段。分享实际阅读来源时保留文字，避免丢失链接。群聊暂不发语音；单次语音消息不混合图片或文字消息段。
+
+管理面板“记忆与设置”提供每会话语音开关、全局女声选择、语速、音调、主动语音概率、“本机试听”和“发到 QQ 测试”；全局声音参数保存在 SQLite，优先于同名 TOML 默认值。先保存声音，再试听。也可私聊发送 `/语音测试`，它不调用模型、不占主动任务名额，但仍受发送队列和手动测试防重复限制。测试本身是你主动请求发送，不受夜间自动联系规则限制。
+
+语音合成只向微软朗读服务发送本次需要朗读的正文，不附带聊天历史、QQ 号或 DeepSeek 密钥。最长默认 180 字，包含链接、代码或超长正文时保留完整文字；合成最多等待 25 秒、限制 2 MiB，并发最多两次。语音字节只在内存中处理，不保存私人音频；SQLite 日记和会话历史仍保留对应文字。面板试听使用固定示例句。QQ/NapCat 可能缓存收到或发出的媒体，清理和留存由其自身机制决定。
+
+日记会记录“正在合成中文语音”、合成成功/失败以及最终发送形式。合成失败可安全退回文字；QQ 发送请求失败时仍不自动重发，因为回执不确定时重发可能导致重复消息。若有语音发送错误，检查 `[voice]`、`[message]` 和 NapCat 音频转换日志；当前 Docker 镜像的音频转换能力需要真实语音测试确认。
+
+当前实现是发送语音消息，不包含来信语音识别、实时双向通话或主动拨打 QQ 电话。

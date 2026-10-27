@@ -35,9 +35,14 @@ FIELDS = {
                   "max_page_bytes", "max_page_chars", "search_enabled", "search_domains", "interests"},
     "dashboard": {"enabled", "access_token", "activity_limit"},
     "stickers": {"enabled", "builtin_dir", "upload_dir", "max_bytes", "min_interval_seconds"},
+    "voice": {"enabled", "voice", "rate_percent", "pitch_hz", "proactive_probability", "min_interval_seconds",
+              "max_chars", "max_bytes", "timeout_seconds"},
 }
 
 DEFAULTS = {
+    "voice": {"enabled": False, "voice": "zh-CN-XiaoxiaoNeural", "rate_percent": -8, "pitch_hz": -2,
+              "proactive_probability": 0.25, "min_interval_seconds": 3600.0, "max_chars": 180,
+              "max_bytes": 2097152, "timeout_seconds": 25.0},
     "dashboard": {"enabled": True, "access_token": "", "activity_limit": 1000},
     "stickers": {"enabled": True, "builtin_dir": "assets/stickers", "upload_dir": "data/stickers",
                  "max_bytes": 1048576, "min_interval_seconds": 300.0},
@@ -264,6 +269,20 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
             _fail(f"stickers.{key}", f"必须位于项目 {root} 目录内")
     _integer(stickers["max_bytes"], "stickers.max_bytes", 1024, 5242880)
     _number(stickers["min_interval_seconds"], "stickers.min_interval_seconds", 0.0)
+    voice = config["voice"]
+    if type(voice["enabled"]) is not bool:
+        _fail("voice.enabled", "必须为 true 或 false")
+    if voice["voice"] not in ("zh-CN-XiaoxiaoNeural", "zh-CN-XiaoyiNeural"):
+        _fail("voice.voice", "必须是 zh-CN-XiaoxiaoNeural 或 zh-CN-XiaoyiNeural")
+    _integer(voice["rate_percent"], "voice.rate_percent", -50, 25)
+    _integer(voice["pitch_hz"], "voice.pitch_hz", -20, 20)
+    _number(voice["proactive_probability"], "voice.proactive_probability", 0.0)
+    if voice["proactive_probability"] > 1:
+        _fail("voice.proactive_probability", "不能超过 1")
+    _number(voice["min_interval_seconds"], "voice.min_interval_seconds", 0.0)
+    _integer(voice["max_chars"], "voice.max_chars", 40, 300)
+    _integer(voice["max_bytes"], "voice.max_bytes", 1024, 5242880)
+    _number(voice["timeout_seconds"], "voice.timeout_seconds", 1.0)
     return config
 
 

@@ -222,3 +222,15 @@ builtin_dir = "assets/stickers" # 默认随代码提供的原创测试表情，�
 upload_dir = "data/stickers" # 默认自定义图片目录，面板上传后跨重启保留，禁止提交到 Git
 max_bytes = 1048576 # 默认单张最大 1 MiB；支持 PNG、JPEG、GIF、WebP
 min_interval_seconds = 300.0 # 默认同会话自动配表情至少相隔 5 分钟；手动测试按钮不受此冷却影响
+
+
+[voice]
+enabled = false # 默认关闭；开启后将待朗读正文发送给微软 Edge 在线朗读服务，无须额外 API Key
+voice = "zh-CN-XiaoxiaoNeural" # 默认晓晓中文女声；另一选项 zh-CN-XiaoyiNeural（晓伊）
+rate_percent = -8 # 默认语速降低 8%，允许 -50 到 25
+pitch_hz = -2 # 默认音调降低 2 Hz，允许 -20 到 20
+proactive_probability = 0.25 # 默认纯闲聊主动回复有 25% 概率使用语音；含网页来源的分享仍发文字
+min_interval_seconds = 3600.0 # 默认自动语音至少间隔一小时；明确请求和手动测试不受此间隔限制
+max_chars = 180 # 默认最长朗读 180 字；超过长度或含网址、代码时退回完整文字，允许 40—300
+max_bytes = 2097152 # 默认合成音频最大 2 MiB，超过时退回文字，允许 1024—5242880 字节
+timeout_seconds = 25.0 # 默认单次合成最多等待 25 秒；失败后不重试，保留文字回复
