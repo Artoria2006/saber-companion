@@ -31,6 +31,15 @@ class Store:
                     owner TEXT NOT NULL, url TEXT NOT NULL, digest TEXT NOT NULL,
                     PRIMARY KEY(owner, url)
                 );
+                CREATE TABLE IF NOT EXISTS activities (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, session_key TEXT NOT NULL,
+                    created REAL NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL,
+                    summary TEXT NOT NULL, detail TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS activity_session ON activities(session_key,id);
+                CREATE TABLE IF NOT EXISTS preferences (
+                    key TEXT PRIMARY KEY, value TEXT NOT NULL
+                );
             """)
 
     @contextmanager
@@ -130,3 +139,38 @@ class Store:
             db.execute("INSERT INTO pages(owner,url,digest) VALUES(?,?,?) ON CONFLICT(owner,url) DO UPDATE SET digest=excluded.digest",
                        (owner, url, digest))
         return previous is None or previous["digest"] != digest
+
+    def sessions(self):
+        with self.db() as db:
+            rows = db.execute("SELECT key FROM sessions ORDER BY last_user DESC LIMIT 1000").fetchall()
+        return [self.get(row["key"]) for row in rows]
+
+    def preference(self, key, default=None):
+        with self.db() as db:
+            row = db.execute("SELECT value FROM preferences WHERE key=?", (key,)).fetchone()
+        return json.loads(row["value"]) if row else default
+
+    def set_preference(self, key, value):
+        with self.db() as db:
+            db.execute("INSERT INTO preferences(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                       (key, json.dumps(value, ensure_ascii=False)))
+
+    def activity(self, session_key, kind, status, summary, detail=None, limit=1000):
+        with self.db() as db:
+            cursor = db.execute("INSERT INTO activities(session_key,created,kind,status,summary,detail) VALUES(?,?,?,?,?,?)",
+                                (session_key, time.time(), kind, status, summary, json.dumps(detail or {}, ensure_ascii=False)))
+            db.execute("DELETE FROM activities WHERE id NOT IN (SELECT id FROM activities ORDER BY id DESC LIMIT ?)", (limit,))
+            return cursor.lastrowid
+
+    def activities(self, session_key=None, before=0, limit=60, include_global=False):
+        clauses, args = [], []
+        if session_key:
+            clauses.append("(session_key=? OR session_key='')" if include_global else "session_key=?")
+            args.append(session_key)
+        if before:
+            clauses.append("id<?")
+            args.append(before)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        with self.db() as db:
+            rows = db.execute("SELECT * FROM activities" + where + " ORDER BY id DESC LIMIT ?", (*args, limit)).fetchall()
+        return [dict(row, detail=json.loads(row["detail"])) for row in rows]

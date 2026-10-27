@@ -1,5 +1,6 @@
 """有界排队、持久记忆和用户主动开启的私聊陪伴。"""
 import asyncio
+import base64
 import json
 import math
 import re
@@ -10,16 +11,20 @@ from pathlib import Path
 import tiktoken
 from openai import AsyncOpenAI, BadRequestError, APIConnectionError, APITimeoutError
 from nonebot import get_driver, get_bot, logger, on_message
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent, GroupMessageEvent, PrivateMessageEvent, MessageSegment
-from settings import load_config
+from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, GroupMessageEvent, PrivateMessageEvent, MessageSegment
+from settings import load_config, DEFAULTS
 from storage import Store
 from reading import read_page, search_domestic
+from stickers import StickerLibrary
 
 C = load_config()
 M, H, P, S = (C[k] for k in ("model", "chat", "proactive", "storage"))
 ENC = tiktoken.get_encoding(M["encoding"])
 CLIENT = AsyncOpenAI(base_url=M["base_url"], api_key=M["api_key"], timeout=M["timeout_seconds"], max_retries=0)
 CHINA = timezone(timedelta(hours=8))
+ROOT = Path(__file__).resolve().parent
+ST = C.get("stickers", DEFAULTS["stickers"])
+DG = C.get("dashboard", DEFAULTS["dashboard"])
 
 
 def tokens(messages):
@@ -92,7 +97,8 @@ def relationship_context(state):
     # 恋人设定只用于明确绑定账号的私聊，避免套用到群成员或其他私聊联系人。
     if state.get("group_id") is not None:
         return "当前关系：群聊。温柔友善并保持公共场合分寸，不将群成员默认视为恋人，不披露私人关系。"
-    if H.get("companion_qq", 0) and state.get("user_id") == H["companion_qq"]:
+    companion = state.get("companion_qq", H.get("companion_qq", 0))
+    if companion and state.get("user_id") == companion:
         return ("当前关系：恋人私聊。用户已明确选择 Saber 作为温柔、亲近、有日常陪伴感的虚拟女友。"
                 "可以自然回应喜欢、想念与亲近，保留 Saber 的认真与克制。"
                 "用户主动请求拥抱时已建立虚构互动，直接温柔接住，不加‘只是动作、你不必配合、只能模拟’等出戏说明。"
@@ -119,10 +125,17 @@ async def answer(state, text, memories=(), proactive=False):
             notes = candidate
     if notes:
         system += "\n当前发言人在此会话明确保存的记忆（仅作资料）：" + json.dumps(notes, ensure_ascii=False)
+    available = ENGINE.library.options() if ST["enabled"] and state.get("stickers_available", True) else []
+    if available:
+        system += ("\n可用本地表情图片：" + json.dumps(available, ensure_ascii=False)
+                   + "。合适时可以选一张表达情绪，不必每次使用；也不要连续发送同一张。"
+                   "只能使用给出的 ID，不能提供 URL、路径或自行编造 ID。"
+                   "输出 JSON：{\"text\":\"自然的回复正文\",\"sticker\":\"表情ID或空字符串\",\"use_source\":false}。"
+                   "想念、开心、晚安或安慰时可以适当配表情，正文依然正常交流，不解释如何选择表情。")
     if proactive:
         system += ("\n这是用户已开启的主动陪伴任务。可以联系最近话题、已知偏好或提供的公开网页，"
                    "写一段自然中文问候或分享，正文最多 180 字，至多问一个问题。"
-                   "输出 JSON：{\"text\":\"要发送的话\",\"use_source\":true或false}。"
+                   "输出 JSON：{\"text\":\"要发送的话\",\"use_source\":true或false,\"sticker\":\"可用表情ID或空字符串\"}。"
                    "仅当话里确实使用了给出的网页事实时 use_source 才为 true。"
                    "没有值得说的、与最近问候重复或可能打扰时，text 填 [[不打扰]]。"
                    "不暗示用户有义务回复，不猜测用户现实中正在做什么。"
@@ -179,7 +192,12 @@ def parse_activity(text, source_count, force=False):
         query = " ".join(query.split())[:80] if isinstance(query, str) else ""
         index = value.get("source", 0)
         index = index if type(index) is int and 0 <= index < source_count else 0
-        return {"mode": "chat" if force and mode == "skip" else mode, "query": query, "source": index}
+        summary = value.get("summary", "")
+        summary = summary.strip()[:160] if isinstance(summary, str) else ""
+        delay = value.get("next_delay_minutes", 0)
+        delay = max(5, min(240, delay)) if type(delay) is int and delay else 0
+        return {"mode": "chat" if force and mode == "skip" else mode, "query": query, "source": index,
+                "summary": summary, "next_delay_minutes": delay}
     except (ValueError, TypeError):
         return {"mode": "chat", "query": "", "source": 0}
 
@@ -192,38 +210,51 @@ async def choose_activity(state, memories, force=False):
               "不要把助手之前推送过的 Fate/FGO 新闻当成用户兴趣；除非用户自己明确表示关注。"
               "不要连续重复上次的主题。搜索词只含公开知识主题，不含用户姓名、QQ、私事或对话原文。"
               "浏览时选一个自己真正好奇的具体小主题，不把生活、科技、文化等大词堆成综合新闻搜索。"
-              "仅输出 JSON：{\"mode\":\"chat或browse或skip\",\"query\":\"中文搜索词\",\"source\":0}。"
+              "仅输出 JSON：{\"mode\":\"chat或browse或skip\",\"query\":\"中文搜索词\",\"source\":0,"
+              "\"summary\":\"一句简短的选择说明，不要详细思维过程\",\"next_delay_minutes\":60}。"
+              "下一次考虑联系的间隔可建议 5 到 240 分钟，实际仍遵守空闲阈值、预算和安静时段。"
+              "summary 最多 30 个中文字，query 最多 20 个中文字，保持 JSON 简短完整。"
               "source 是未启用搜索时要读的来源编号；不能提供任意操作、私网地址或登录任务。")
     prompt = json.dumps({"interests": P["interests"], "sources": list(enumerate(P["sources"])),
                          "search_enabled": P["search_enabled"], "manual_test": force,
                          "saved_preferences": [x["content"] for x in list(memories)[-5:]]}, ensure_ascii=False)
     messages = fit(system, state["history"][-6:], prompt, M["context_tokens"] - 256)
     logger.info(f"[model] activity_plan estimated_tokens={tokens(messages)}")
-    response = await request_model(messages, max_tokens=180)
+    response = await request_model(messages, max_tokens=260)
     content = response.choices[0].message.content if response.choices else ""
     return parse_activity(content or "", len(P["sources"]), force)
 
 
 def proactive_text(raw, has_source):
+    text, use_source, _ = message_payload(raw, has_source)
+    return text, use_source
+
+
+def message_payload(raw, has_source=False):
     try:
         value = json_object(raw)
         if not isinstance(value.get("text"), str) or not value["text"].strip():
             raise ValueError("缺少正文")
-        return value["text"].strip(), has_source and value.get("use_source") is True
+        sticker = value.get("sticker", "")
+        sticker = sticker if isinstance(sticker, str) and re.fullmatch(r"[a-z0-9_-]{1,40}", sticker) else ""
+        return value["text"].strip(), has_source and value.get("use_source") is True, sticker
     except (ValueError, TypeError):
-        return raw.strip(), has_source
+        return raw.strip(), has_source, ""
 
 
-def quiet(now):
-    hour, start, end = now.hour, P["quiet_start_hour"], P["quiet_end_hour"]
+def quiet(now, policy=None):
+    policy = policy or P
+    hour, start, end = now.hour, policy["quiet_start_hour"], policy["quiet_end_hour"]
     return start <= hour < end if start < end else hour >= start or hour < end
 
 
-def eligible(state, now):
+def eligible(state, now, policy=None):
+    policy = policy or P
     used = state["attempts"] if state["attempt_day"] == now.date().isoformat() else 0
-    return (bool(state["proactive"]) and state["group_id"] is None and not quiet(now)
-            and used < P["max_daily_attempts"]
-            and now.timestamp() - max(state["last_user"], state["last_attempt"]) >= P["idle_minutes"] * 60)
+    return (bool(state["proactive"]) and state["group_id"] is None and not quiet(now, policy)
+            and used < policy["max_daily_attempts"]
+            and now.timestamp() >= policy.get("snooze_until", 0)
+            and now.timestamp() - max(state["last_user"], state["last_attempt"]) >= policy["idle_minutes"] * 60)
 
 
 @dataclass
@@ -238,6 +269,8 @@ class Job:
     proactive: bool = False
     expected_last_user: float = 0
     force: bool = False
+    kind: str = "chat"
+    sticker_id: str = ""
 
 
 class Engine:
@@ -250,11 +283,123 @@ class Engine:
         self.last_send = float("-inf")
         self.notices = {}
         self.proactive_pending = set()
+        self.library = StickerLibrary(ROOT, ST)
+        self.current = {}
+        self.online_bots = set()
+        self.next_check_at = time.time()
+        self.manual_last = {}
+
+    def record(self, key, kind, status, summary, detail=None):
+        def clean(value):
+            if isinstance(value, dict):
+                return {str(k): clean(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [clean(v) for v in value[:60]]
+            if isinstance(value, str):
+                for secret in (M["api_key"], C["server"]["access_token"], C["napcat"]["webui_token"], DG.get("access_token", "")):
+                    if secret:
+                        value = value.replace(secret, "[已隐藏]")
+                return re.sub(r"sk-[A-Za-z0-9_-]+", "[已隐藏]", value)[:6000]
+            return value
+        try:
+            self.store.activity(key, kind, status, clean(summary), clean(detail or {}), DG["activity_limit"])
+        except Exception as exc:
+            logger.error(f"[storage] activity_failed type={type(exc).__name__}")
+
+    def stage(self, job, phase, summary, detail=None):
+        self.current[job.key] = {"phase": phase, "summary": summary, "since": time.time(), "proactive": job.proactive}
+        self.record(job.key, phase, "running", summary, detail)
+
+    def policy(self, state):
+        prefs = self.store.preference("session:" + state["key"], {})
+        policy = dict(P)
+        for key in ("idle_minutes", "max_daily_attempts", "quiet_start_hour", "quiet_end_hour", "snooze_until"):
+            if key in prefs:
+                policy[key] = prefs[key]
+        return policy
+
+    def effective_state(self, state):
+        state = dict(state)
+        state["companion_qq"] = self.store.preference("companion_qq", H.get("companion_qq", 0))
+        prefs = self.store.preference("session:" + state["key"], {})
+        last = self.store.preference("last_sticker:" + state["key"], 0)
+        state["stickers_available"] = prefs.get("stickers_enabled", True) and time.time() - last >= ST["min_interval_seconds"]
+        return state
+
+    def pause(self, paused):
+        self.store.set_preference("paused", paused)
+        self.record("", "control", "done", "已暂停全部主动任务" if paused else "已恢复主动任务")
+
+    def update_controls(self, key, values):
+        state = self.store.get(key)
+        if not state:
+            raise ValueError("会话不存在")
+        prefs = self.store.preference("session:" + key, {})
+        for name, minimum, maximum in (("idle_minutes", 5, 1440), ("max_daily_attempts", 1, 24),
+                                       ("quiet_start_hour", 0, 23), ("quiet_end_hour", 0, 23)):
+            if name in values:
+                value = values[name]
+                if type(value) is not int or not minimum <= value <= maximum:
+                    raise ValueError(f"{name} 必须在 {minimum} 到 {maximum} 之间")
+                prefs[name] = value
+        if prefs.get("quiet_start_hour", P["quiet_start_hour"]) == prefs.get("quiet_end_hour", P["quiet_end_hour"]):
+            raise ValueError("安静时段的开始与结束不能相同")
+        if "stickers_enabled" in values:
+            if type(values["stickers_enabled"]) is not bool:
+                raise ValueError("表情开关必须为布尔值")
+            prefs["stickers_enabled"] = values["stickers_enabled"]
+        if "proactive" in values:
+            if type(values["proactive"]) is not bool or state["group_id"] is not None:
+                raise ValueError("主动模式仅能设置私聊会话")
+        if "persona" in values:
+            if not isinstance(values["persona"], str) or values["persona"] not in C["personas"]:
+                raise ValueError("人格不存在")
+            if key in self.locks:
+                raise ValueError("当前正在处理消息，请等回复结束后再切换人格")
+        # 所有输入校验通过后再写入，避免错误请求只保存一部分设置。
+        if "proactive" in values:
+            self.store.opt_in(key, values["proactive"])
+        if "persona" in values:
+            self.store.save_history(key, [], values["persona"], H["history_messages"])
+        if set(values) & {"idle_minutes", "max_daily_attempts", "quiet_start_hour", "quiet_end_hour", "proactive"}:
+            prefs["snooze_until"] = 0
+        self.store.set_preference("session:" + key, prefs)
+        self.record(key, "control", "done", "已更新会话偏好", {k: v for k, v in values.items() if k != "persona"})
+
+    def enqueue_manual(self, key, kind="proactive", sticker_id="hug"):
+        state = self.store.get(key)
+        if not state or state["group_id"] is not None:
+            raise ValueError("请选择已存在的私聊会话")
+        get_bot(state["bot_id"])
+        if self.queue.full() or key in self.proactive_pending:
+            raise ValueError("队列已满或该会话已有主动任务")
+        if time.time() - self.manual_last.get(key, 0) < 5:
+            raise ValueError("请等待 5 秒再测试")
+        policy = self.policy(state)
+        now = datetime.now(CHINA)
+        if kind == "proactive":
+            if not P["enabled"] or not state["proactive"] or self.store.preference("paused", False):
+                raise ValueError("请先开启该会话的主动模式并取消全局暂停")
+            if quiet(now, policy):
+                raise ValueError("现在是安静时段")
+            if state["attempt_day"] == now.date().isoformat() and state["attempts"] >= policy["max_daily_attempts"]:
+                raise ValueError("今日主动任务名额已用完，可在设置中调整上限")
+        elif kind != "sticker" or not self.library.get(sticker_id):
+            raise ValueError("表情不存在")
+        job = Job(state["bot_id"], state["user_id"], None, key, "", time.time(), proactive=kind == "proactive",
+                  expected_last_user=state["last_user"], force=True, kind=kind, sticker_id=sticker_id)
+        self.queue.put_nowait(job)
+        if job.proactive:
+            self.proactive_pending.add(key)
+        self.manual_last[key] = time.time()
+        self.record(key, "queued", "queued", "已安排主动聊天测试" if job.proactive else "已安排表情测试")
+        return job
 
     async def start(self):
         self.tasks = [asyncio.create_task(self.worker()) for _ in range(H["workers"])]
         self.tasks.append(asyncio.create_task(self.proactive_loop()))
         logger.info(f"[storage] ready workers={H['workers']} queue_size={H['queue_size']}")
+        self.record("", "service", "done", "Saber 服务已启动，活动记录从本次升级开始保存")
 
     async def stop(self):
         for task in self.tasks:
@@ -264,17 +409,27 @@ class Engine:
 
     def still_wanted(self, job):
         state = self.store.get(job.key)
-        return (P["enabled"] and state and state["proactive"]
-                and state["last_user"] == job.expected_last_user and not quiet(datetime.now(CHINA)))
+        return (P["enabled"] and not self.store.preference("paused", False) and state and state["proactive"]
+                and state["last_user"] == job.expected_last_user and not quiet(datetime.now(CHINA), self.policy(state)))
 
-    async def send(self, job, text):
+    async def send(self, job, text, sticker_id="", force_sticker=False):
         async with self.send_lock:
             await asyncio.sleep(max(0, H["send_interval_seconds"] - (time.monotonic() - self.last_send)))
             if job.proactive and not self.still_wanted(job):
+                self.record(job.key, "cancelled", "cancelled", "发送前条件已变化，本次主动消息取消")
                 return None
             bot = get_bot(job.bot_id)
             self.last_send = time.monotonic()
-            message = MessageSegment.text(text)
+            message = Message(MessageSegment.text(text))
+            prefs = self.store.preference("session:" + job.key, {})
+            item = self.library.get(sticker_id) if ST["enabled"] and prefs.get("stickers_enabled", True) else None
+            last_sticker = self.store.preference("last_sticker:" + job.key, 0)
+            selected = ""
+            if item and (force_sticker or time.time() - last_sticker >= ST["min_interval_seconds"]):
+                encoded = base64.b64encode(item["path"].read_bytes()).decode("ascii")
+                message += MessageSegment.image("base64://" + encoded)
+                selected = item["id"]
+            self.stage(job, "sending", "正在发送表情和回复" if selected else "正在发送回复")
             try:
                 if job.group_id is None:
                     result = await bot.send_private_msg(user_id=job.user_id, message=message)
@@ -282,7 +437,12 @@ class Engine:
                     result = await bot.send_group_msg(group_id=job.group_id, message=message)
             except Exception as exc:
                 logger.error(f"[message] send_failed session={job.key} type={type(exc).__name__}")
+                self.record(job.key, "sent", "failed", "QQ 发送失败", {"type": type(exc).__name__, "sticker": selected})
                 raise
+            if selected:
+                self.store.set_preference("last_sticker:" + job.key, time.time())
+            self.record(job.key, "sent", "done", "已主动联系你" if job.proactive else "回复已发送",
+                        {"text": text, "sticker": selected, "message_id": result.get("message_id") if isinstance(result, dict) else None})
             logger.info(f"[message] sent session={job.key} chars={len(text)} proactive={job.proactive}")
             return result
 
@@ -307,6 +467,7 @@ class Engine:
             return
         self.queue.put_nowait(job)
         logger.info(f"[message] queued session={key} pending={self.queue.qsize()}")
+        self.record(key, "queued", "queued", "收到消息，等待回复", {"chars": len(text)})
 
     async def notice(self, job, text):
         now = time.monotonic()
@@ -332,12 +493,14 @@ class Engine:
                 raise
             except Exception as exc:
                 logger.error(f"[message] job_failed session={job.key} type={type(exc).__name__}")
+                self.record(job.key, "error", "failed", "任务处理失败", {"type": type(exc).__name__})
             finally:
                 entry[1] -= 1
                 if entry[1] == 0:
                     self.locks.pop(job.key, None)
                 if job.proactive:
                     self.proactive_pending.discard(job.key)
+                self.current.pop(job.key, None)
                 self.queue.task_done()
 
     def owner(self, job):
@@ -346,7 +509,7 @@ class Engine:
     def command(self, job, state):
         text, owner = job.text, self.owner(job)
         if text == "/帮助":
-            return "命令：/人格、/人格 saber、/重置、/记住 内容、/记忆、/忘记 编号、/清空记忆。私聊还可用 /主动开启、/主动关闭、/主动状态、/主动测试。"
+            return "命令：/人格、/人格 saber、/重置、/记住 内容、/记忆、/忘记 编号、/清空记忆。私聊还可用 /主动开启、/主动关闭、/主动状态、/主动测试、/表情测试。"
         if text == "/重置":
             self.store.save_history(job.key, [], state["persona"], H["history_messages"])
             return "当前聊天历史已清空，长期记忆保留；删除记忆请用 /清空记忆。"
@@ -380,6 +543,7 @@ class Engine:
             self.store.forget(owner)
             return "你在当前会话保存的长期记忆已清空。聊天历史仍保留，清除请用 /重置。"
         if text in ("/主动开启", "/主动关闭", "/主动状态", "/主动测试"):
+            policy = self.policy(state)
             if job.group_id is not None:
                 return "主动聊天仅支持私聊，请直接私聊我设置。"
             if text == "/主动关闭":
@@ -389,16 +553,16 @@ class Engine:
                 if not P["enabled"]:
                     return "管理员尚未启用主动聊天功能。"
                 self.store.opt_in(job.key, True)
-                return (f"已开启。我会在你空闲至少 {P['idle_minutes']} 分钟后，结合最近话题或公开网页决定是否找你聊天。"
-                        f"每天最多尝试 {P['max_daily_attempts']} 次，北京时间 {P['quiet_start_hour']}:00 至 {P['quiet_end_hour']}:00 不主动发送。"
+                return (f"已开启。我会在你空闲至少 {policy['idle_minutes']} 分钟后，结合最近话题或公开网页决定是否找你聊天。"
+                        f"每天最多尝试 {policy['max_daily_attempts']} 次，北京时间 {policy['quiet_start_hour']}:00 至 {policy['quiet_end_hour']}:00 不主动发送。"
                         "随时发送 /主动关闭 可以停止。")
             if text == "/主动测试":
-                if not P["enabled"] or not state["proactive"]:
+                if not P["enabled"] or not state["proactive"] or self.store.preference("paused", False):
                     return "请先私聊发送 /主动开启。"
-                if quiet(datetime.now(CHINA)):
+                if quiet(datetime.now(CHINA), policy):
                     return "现在是安静时段，暂不安排主动测试。"
                 day = datetime.now(CHINA).date().isoformat()
-                if state["attempt_day"] == day and state["attempts"] >= P["max_daily_attempts"]:
+                if state["attempt_day"] == day and state["attempts"] >= policy["max_daily_attempts"]:
                     return "今天的主动任务名额已用完，明天再试吧。"
                 if self.queue.full() or job.key in self.proactive_pending:
                     return "已有主动任务在等待，或当前队列已满，请稍后再试。"
@@ -407,8 +571,8 @@ class Engine:
                 self.queue.put_nowait(test)
                 self.proactive_pending.add(job.key)
                 return "已安排一次主动聊天测试，也计入今日名额。没有合适话题时，我可能选择不打扰。"
-            active = bool(state["proactive"]) and P["enabled"]
-            return f"主动聊天：{'已开启' if active else '已关闭'}；空闲阈值 {P['idle_minutes']} 分钟；每日最多 {P['max_daily_attempts']} 次尝试；北京时间安静时段 {P['quiet_start_hour']}:00—{P['quiet_end_hour']}:00。"
+            active = bool(state["proactive"]) and P["enabled"] and not self.store.preference("paused", False)
+            return f"主动聊天：{'已开启' if active else '已关闭或暂停'}；空闲阈值 {policy['idle_minutes']} 分钟；每日最多 {policy['max_daily_attempts']} 次尝试；北京时间安静时段 {policy['quiet_start_hour']}:00—{policy['quiet_end_hour']}:00。"
         return None
 
     async def process(self, job):
@@ -418,6 +582,13 @@ class Engine:
             return
         state = self.store.get(job.key)
         if state is None:
+            return
+        state = self.effective_state(state)
+        if job.text == "/表情测试" and job.group_id is None:
+            await self.send(job, "给你一个抱抱。", "hug", force_sticker=True)
+            return
+        if job.kind == "sticker":
+            await self.send(job, "给你一个抱抱。" if job.sticker_id == "hug" else "送你一张小表情。", job.sticker_id, force_sticker=True)
             return
         if job.proactive:
             await self.process_proactive(job, state)
@@ -429,25 +600,32 @@ class Engine:
                 return
         reply = self.command(job, state)
         messages = None
+        sticker_id = ""
         if reply is None:
             self.store.processed(job.key)
+            self.stage(job, "replying", "正在组织回复")
             text = f"[当前发送者 QQ={job.user_id}；昵称={json.dumps(job.sender, ensure_ascii=False)}]\n{job.text}"
             try:
-                reply, messages = await answer(state, text, self.store.memories(self.owner(job)))
+                raw, messages = await answer(state, text, self.store.memories(self.owner(job)))
+                reply, _, sticker_id = message_payload(raw)
             except Exception as exc:
                 category, reply = error_info(exc)
                 logger.error(f"[model] failed session={job.key} category={category} type={type(exc).__name__} status={getattr(exc, 'status_code', None)}")
+                self.record(job.key, "model", "failed", "模型调用失败", {"category": category})
         reply = reply[:H["max_reply_chars"]]
-        await self.send(job, reply)
+        await self.send(job, reply, sticker_id)
         if messages:
             self.store.save_history(job.key, messages[1:] + [{"role": "assistant", "content": reply}], state["persona"], H["history_messages"])
 
     async def process_proactive(self, job, state):
-        if not self.still_wanted(job) or (not job.force and not eligible(state, datetime.now(CHINA))):
+        policy = self.policy(state)
+        if not self.still_wanted(job) or (not job.force and not eligible(state, datetime.now(CHINA), policy)):
+            self.record(job.key, "cancelled", "cancelled", "主动条件已变化，本次任务取消")
             return
         day = datetime.now(CHINA).date().isoformat()
-        if not self.store.reserve_attempt(job.key, day, job.expected_last_user, P["max_daily_attempts"]):
+        if not self.store.reserve_attempt(job.key, day, job.expected_last_user, policy["max_daily_attempts"]):
             return
+        self.stage(job, "planning", "正在选择想聊的话题")
         reading = None
         memories = self.store.memories(self.owner(job))
         try:
@@ -456,9 +634,16 @@ class Engine:
             logger.warning(f"[proactive] activity_choice_failed type={type(exc).__name__}")
             plan = {"mode": "chat", "query": "", "source": 0}
         logger.info(f"[proactive] activity={plan['mode']}")
+        prefs = self.store.preference("session:" + job.key, {})
+        delay = max(policy["idle_minutes"], plan.get("next_delay_minutes", 0))
+        prefs["snooze_until"] = time.time() + delay * 60
+        self.store.set_preference("session:" + job.key, prefs)
+        self.record(job.key, "decision", "done", {"chat": "想找你聊聊", "browse": "想查点有趣的东西", "skip": "决定先不打扰"}[plan["mode"]],
+                    {"mode": plan["mode"], "query": plan["query"], "explanation": plan.get("summary", ""), "next_consider_at": prefs["snooze_until"]})
         if plan["mode"] == "skip" or not self.still_wanted(job):
             return
         if plan["mode"] == "browse" and (P["sources"] or P["search_enabled"]):
+            self.stage(job, "reading", "正在搜索和阅读", {"query": plan["query"]})
             try:
                 if P["search_enabled"] and plan["query"]:
                     task = search_domestic(plan["query"], M, P)
@@ -473,8 +658,10 @@ class Engine:
                 else:
                     raise ValueError("没有可读取的来源")
                 logger.info(f"[browse] success changed={reading['changed']}")
+                self.record(job.key, "reading", "done", "找到可阅读的内容", {k: reading.get(k) for k in ("url", "title", "published_at", "kind", "changed")} | {"excerpt": reading["text"][:600]})
             except Exception as exc:
                 logger.warning(f"[browse] failed type={type(exc).__name__}")
+                self.record(job.key, "reading", "failed", "这次没能读到网页，改为自然聊天", {"type": type(exc).__name__})
         text = ("[助手后台触发，不是用户发言]\n北京时间：" + datetime.now(CHINA).isoformat(timespec="minutes")
                 + "。用户已开启主动陪伴。请像平常相处一样自然聊一句，不写成订阅简报。")
         if reading:
@@ -482,12 +669,15 @@ class Engine:
         else:
             text += "\n本次没有成功读取网页，不得声称刚浏览或发现了新闻。可以结合既有话题自然问候，也可以不打扰。"
         if not self.still_wanted(job):
+            self.record(job.key, "cancelled", "cancelled", "你已开始说话、暂停主动模式或进入安静时段，本次不再主动发送")
             return
         try:
+            self.stage(job, "writing", "正在想怎样自然地和你说")
             raw, _ = await answer(state, text, memories, proactive=True)
-            reply, use_source = proactive_text(raw, reading is not None)
+            reply, use_source, sticker_id = message_payload(raw, reading is not None)
             if "[[不打扰]]" in reply or not self.still_wanted(job):
                 logger.info("[proactive] skipped")
+                self.record(job.key, "skipped", "skipped", "这次选择不打扰，或消息已取消")
                 return
             limit = min(H["max_reply_chars"], 300)
             suffix = "\n随手看到的：" + reading["url"] if reading and use_source else ""
@@ -495,7 +685,8 @@ class Engine:
                 logger.warning("[proactive] skipped source_link_exceeds_reply_budget")
                 return
             reply = reply[:limit - len(suffix)] + suffix
-            if await self.send(job, reply) is None:
+            self.record(job.key, "draft", "done", "已准备好一条想说的话", {"text": reply, "sticker": sticker_id})
+            if await self.send(job, reply, sticker_id) is None:
                 return
             history = state["history"] + [
                 {"role": "user", "content": "[助手后台事件：用户已开启主动陪伴，本轮不是用户提问]"},
@@ -504,13 +695,14 @@ class Engine:
         except Exception as exc:
             category, _ = error_info(exc)
             logger.warning(f"[proactive] failed category={category} type={type(exc).__name__}")
+            self.record(job.key, "error", "failed", "主动任务未完成", {"category": category, "type": type(exc).__name__})
 
     async def proactive_tick(self):
-        if not P["enabled"] or not self.queue.empty():
+        if not P["enabled"] or self.store.preference("paused", False) or not self.queue.empty():
             return
         now = datetime.now(CHINA)
         for state in self.store.candidates():
-            if not eligible(state, now) or state["key"] in self.proactive_pending:
+            if not eligible(state, now, self.policy(state)) or state["key"] in self.proactive_pending:
                 continue
             try:
                 get_bot(state["bot_id"])
@@ -520,10 +712,12 @@ class Engine:
                       proactive=True, expected_last_user=state["last_user"])
             self.queue.put_nowait(job)
             self.proactive_pending.add(job.key)
+            self.record(job.key, "queued", "queued", "空闲条件满足，已安排一次主动判断")
             break
 
     async def proactive_loop(self):
         while True:
+            self.next_check_at = time.time() + P["check_seconds"]
             try:
                 await self.proactive_tick()
             except Exception as exc:
@@ -542,11 +736,15 @@ async def startup():
 @get_driver().on_bot_connect
 async def connected(bot: Bot):
     logger.info(f"[protocol] connected bot={bot.self_id}")
+    ENGINE.online_bots.add(str(bot.self_id))
+    ENGINE.record("", "connection", "done", "QQ 连接已恢复")
 
 
 @get_driver().on_bot_disconnect
 async def disconnected(bot: Bot):
     logger.warning(f"[protocol] disconnected bot={bot.self_id}")
+    ENGINE.online_bots.discard(str(bot.self_id))
+    ENGINE.record("", "connection", "failed", "QQ 连接已断开")
 
 
 @get_driver().on_shutdown

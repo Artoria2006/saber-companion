@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Saber 的小日常 · Companion</title>
+  <link rel="stylesheet" href="/panel/static/style.css">
+  <script src="/panel/static/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/panel/"><span class="brand-icon">S</span><span>Saber<span class="brand-sub">COMPANION</span></span></a>
+    <div class="side-label">陪伴工作台</div>
+    <nav>
+      <button class="nav active" data-view="overview"><span>◈</span>相处概览</button>
+      <button class="nav" data-view="diary"><span>◷</span>活动日记</button>
+      <button class="nav" data-view="stickers"><span>♡</span>表情收藏</button>
+      <button class="nav" data-view="settings"><span>⚙</span>记忆与设置</button>
+    </nav>
+    <div class="side-note"><span class="dot" id="sideDot"></span><span id="sideConnection">等待连接</span><small>本机工作台 · 数据保存在本地</small></div>
+  </aside>
+  <main>
+    <header class="topbar"><div class="breadcrumb">Saber / <span id="viewTitle">相处概览</span></div><div class="top-right"><span id="clock">北京时间</span><button class="text-button" id="logout">退出管理</button></div></header>
+    <div class="page-head"><div><div class="eyebrow">A LITTLE CLOSER, EVERY DAY</div><h1>她的小日常<span class="beta">LIVE</span></h1><p>看看她读到了什么，也给下一次相遇留一点期待。</p></div><div class="head-actions"><select id="sessionSelect" aria-label="选择会话"><option>等待会话…</option></select><button id="refresh" class="secondary">刷新</button></div></div>
+    <section class="view active" id="view-overview">
+      <div class="hero card"><div class="hero-copy"><span class="pill" id="phase">等待连接</span><h2 id="heroTitle">给彼此留一点日常</h2><p id="heroText">连接工作台后，Saber 的活动会在这里实时更新。</p><div class="hero-actions"><button class="primary" id="testNow">让她现在来找我 <span>↗</span></button><button class="secondary" id="pauseAll">暂停主动任务</button></div><small>测试会实际发到选中的私聊，也计入当天主动任务名额。</small></div><div class="hero-art"><div class="halo"></div><img id="heroSticker" alt="Saber 的抱抱表情" hidden><span class="floating-tag">今天也想和你聊聊 ♡</span></div></div>
+      <div class="stats"><article class="card stat"><span>QQ 连接</span><strong id="connection">—</strong><small id="connectionHint">正在读取状态</small></article><article class="card stat"><span>今日主动任务</span><strong id="daily">— <em>/ —</em></strong><div class="meter"><i id="quotaBar"></i></div></article><article class="card stat"><span>最早可考虑联系</span><strong id="nextTime">—</strong><small id="nextReason">尚未选择会话</small></article><article class="card stat"><span>下次条件检查</span><strong id="nextTick">—</strong><small>检查条件后仍可能选择不打扰</small></article></div>
+      <div class="two-columns"><article class="card"><div class="card-head"><h3>此刻的状态</h3><span class="tiny-label" id="modelName">—</span></div><div class="stage-track"><span data-phase="planning">选题</span><i></i><span data-phase="reading">阅读</span><i></i><span data-phase="writing">组织语言</span><i></i><span data-phase="sending">发送</span></div><p id="stageText" class="muted">安静地等到合适的时候。</p><div class="soft-note">这里展示实际活动与简短选择说明，不是完整内部思维过程。</div></article><article class="card"><div class="card-head"><h3>最近一次想分享的</h3><span class="tiny-label">阅读手记</span></div><div id="latestReading" class="empty">还没有新的阅读记录。可以安排一次主动测试。</div></article></div>
+      <article class="card"><div class="card-head"><h3>刚刚发生</h3><button class="text-button" data-go="diary">查看完整日记 →</button></div><div id="recentEvents" class="timeline compact"></div></article>
+    </section>
+    <section class="view" id="view-diary"><article class="card"><div class="card-head"><div><h3>活动日记</h3><p class="muted">选题、搜索、准备与发送，都有迹可循。</p></div><select id="eventFilter"><option value="all">全部活动</option><option value="sent">发给我的</option><option value="reading">阅读与选题</option><option value="failed">错误与取消</option></select></div><div id="diaryEvents" class="timeline"></div><button class="secondary full" id="olderEvents">查看更早的记录</button></article></section>
+    <section class="view" id="view-stickers"><article class="card"><div class="card-head"><div><h3>她的小表情</h3><p class="muted">合适时由她选择，默认至少间隔五分钟。也可以手动发一张试试。</p></div></div><div id="stickerGrid" class="sticker-grid"></div></article><article class="card"><h3>添一张你喜欢的</h3><p class="muted">PNG、JPEG、GIF 或 WebP；自定义图片保存在本机 data 目录。</p><form id="uploadForm" class="upload-row"><input id="stickerLabel" maxlength="40" placeholder="表情名称，例如：摸摸头" required><input type="file" id="stickerFile" accept="image/png,image/jpeg,image/gif,image/webp" required><button class="primary">添加表情</button></form></article></section>
+    <section class="view" id="view-settings"><div class="two-columns"><article class="card"><div class="card-head"><h3>相处的节奏</h3><span class="pill" id="companionBadge">普通会话</span></div><form id="settingsForm"><label class="toggle-row">主动来找我<input id="enabledInput" type="checkbox"></label><label class="toggle-row">允许她配表情图片<input id="stickersInput" type="checkbox"></label><div class="form-grid"><label>空闲至少多少分钟<input id="idleInput" type="number" min="5" max="1440" required></label><label>每天最多判断几次<input id="dailyInput" type="number" min="1" max="24" required></label><label>安静时段开始（北京时间）<input id="quietStartInput" type="number" min="0" max="23" required></label><label>安静时段结束（北京时间）<input id="quietEndInput" type="number" min="0" max="23" required></label></div><label>当前人格<select id="personaInput"></select></label><p class="help">判断次数包含失败和“不打扰”；提高上限会增加模型与搜索调用。更换人格会清空当前聊天历史，显式记忆保留。</p><div class="button-row"><button class="primary">保存偏好</button><button class="secondary" id="bindCompanion" type="button">设为伴侣账号</button></div></form></article><article class="card"><div class="card-head"><h3>她记住的事</h3><span class="tiny-label">显式记忆</span></div><div id="memoryList" class="memory-list"></div><form id="memoryForm"><label for="memoryInput">留一条希望她记住的偏好</label><textarea id="memoryInput" maxlength="300" placeholder="例如：我喜欢说话自然一点，不用每次提醒我吃饭。" required></textarea><button class="secondary">保存记忆</button></form></article></div><article class="card"><div class="card-head"><h3>最近的对话</h3><span class="tiny-label">最近十条 · 仅管理端可见</span></div><div id="history" class="history"></div></article></section>
+    <footer>时间与安静时段均使用北京时间。预计时间是最早可判断的时间，不代表一定会发送消息。</footer>
+  </main>
+  <div id="loginOverlay" class="login-overlay"><form id="loginForm" class="login-card"><div class="brand-icon">S</div><h2>连接 Saber 的小日常</h2><p>输入管理口令，查看她的活动与相处节奏。</p><label for="tokenInput">管理口令</label><input id="tokenInput" type="password" autocomplete="current-password" placeholder="默认与 NapCat WebUI 口令相同" required><button class="primary full">进入工作台</button><small>默认口令为本地 config.toml 中的 napcat.webui_token。密钥只保存在当前浏览器会话。</small><div id="loginError" class="error"></div></form></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

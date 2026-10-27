@@ -279,7 +279,7 @@ class ChatTests(unittest.IsolatedAsyncioTestCase):
             result = await REAL_CHOOSE_ACTIVITY({"persona": "assistant", "history": []}, [])
         self.assertEqual(result["query"], "红茶的由来")
         self.assertEqual(result["source"], 1)
-        self.assertEqual(mock.await_args.kwargs["max_tokens"], 180)
+        self.assertEqual(mock.await_args.kwargs["max_tokens"], 260)
 
     async def test_natural_chat_does_not_read_a_site_or_force_a_link(self):
         self.store.touch("100:u:300", "100", 300, None, "assistant")

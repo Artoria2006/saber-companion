@@ -16,6 +16,8 @@ services:
       - ./config.toml:/app/config.toml:ro
       - ./data:/app/data
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:8099:8080"
 
   napcat:
     image: mlikiowa/napcat-docker:v4.18.41

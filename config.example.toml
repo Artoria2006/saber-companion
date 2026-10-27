@@ -52,6 +52,7 @@ max_page_bytes = 262144 # 默认单页最多读取 256 KiB，超出即停止
 max_page_chars = 3500 # 默认送给模型的网页文字最多 3500 字符
 
 [personas]
+
 assistant = "你是一个认真、简洁的中文助手。" # 默认通用人格
 teacher = "你是耐心的老师，先解释思路，再给出例子。" # 教师人格
 friend = "你是温和的聊天伙伴，语气自然，不编造个人经历。" # 朋友人格
@@ -208,3 +209,16 @@ Saber：嗯，晚安。今天就到这里，剩下的事明天再想。愿你睡
 [napcat]
 webui_token = "CHANGE_ME_WEBUI" # 必填：至少 24 字符，与 WS 密钥分开生成
 reverse_ws_url = "ws://bot:8080/onebot/v11/" # 默认 Docker 地址；两个进程都在宿主机时填 ws://127.0.0.1:8080/onebot/v11/
+
+
+[dashboard]
+enabled = true # 默认开启本机管理面板，Docker 地址 http://127.0.0.1:8099/panel/
+access_token = "" # 默认沿用 napcat.webui_token；如单独填写必须是至少 24 字符的随机密钥
+activity_limit = 1000 # 默认保留最近 1000 条实际活动，含阅读、选择摘要、发送与失败
+
+[stickers]
+enabled = true # 默认允许模型在适合时从本地图片库选一张表情
+builtin_dir = "assets/stickers" # 默认随代码提供的原创测试表情，镜像内只读使用
+upload_dir = "data/stickers" # 默认自定义图片目录，面板上传后跨重启保留，禁止提交到 Git
+max_bytes = 1048576 # 默认单张最大 1 MiB；支持 PNG、JPEG、GIF、WebP
+min_interval_seconds = 300.0 # 默认同会话自动配表情至少相隔 5 分钟；手动测试按钮不受此冷却影响

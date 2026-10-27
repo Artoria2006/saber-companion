@@ -1,0 +1,22 @@
+[
+  {
+    "id": "hug",
+    "label": "抱抱",
+    "file": "hug.png"
+  },
+  {
+    "id": "happy",
+    "label": "好开心",
+    "file": "happy.png"
+  },
+  {
+    "id": "miss",
+    "label": "想你啦",
+    "file": "miss.png"
+  },
+  {
+    "id": "goodnight",
+    "label": "晚安",
+    "file": "goodnight.png"
+  }
+]

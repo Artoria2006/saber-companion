@@ -30,4 +30,4 @@ jobs:
         run: python -m pip check
       - name: 运行离线模拟测试
         # 测试使用示例配置和模拟模型，不需要真实 QQ 或模型密钥。
-        run: python -m unittest -v test_chat.py
+        run: python -m unittest discover -v

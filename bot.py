@@ -46,4 +46,7 @@ if __name__ == "__main__":
         nonebot.get_driver().register_adapter(Adapter)
         if nonebot.load_plugin("chat") is None:
             raise RuntimeError("聊天插件加载失败，请查看启动日志")
+        from chat import ENGINE, C, quiet, CHINA
+        from dashboard import install_dashboard
+        install_dashboard(nonebot.get_app(), ENGINE, C, quiet, CHINA)
         nonebot.run()

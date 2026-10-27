@@ -5,3 +5,11 @@
 !settings.py
 !storage.py
 !reading.py
+!stickers.py
+!dashboard.py
+!web/
+!web/**
+!assets/
+!assets/**
+!LICENSE
+!README.md

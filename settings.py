@@ -33,9 +33,14 @@ FIELDS = {
     "proactive": {"enabled", "idle_minutes", "check_seconds", "max_daily_attempts",
                   "quiet_start_hour", "quiet_end_hour", "sources", "fetch_timeout_seconds",
                   "max_page_bytes", "max_page_chars", "search_enabled", "search_domains", "interests"},
+    "dashboard": {"enabled", "access_token", "activity_limit"},
+    "stickers": {"enabled", "builtin_dir", "upload_dir", "max_bytes", "min_interval_seconds"},
 }
 
 DEFAULTS = {
+    "dashboard": {"enabled": True, "access_token": "", "activity_limit": 1000},
+    "stickers": {"enabled": True, "builtin_dir": "assets/stickers", "upload_dir": "data/stickers",
+                 "max_bytes": 1048576, "min_interval_seconds": 300.0},
     "storage": {"path": "data/assistant.sqlite3", "max_memories": 20, "max_memory_chars": 300},
     "proactive": {"enabled": True, "idle_minutes": 60, "check_seconds": 60,
                   "max_daily_attempts": 4, "quiet_start_hour": 22, "quiet_end_hour": 8,
@@ -242,6 +247,23 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     _number(pro["fetch_timeout_seconds"], "proactive.fetch_timeout_seconds", 1.0)
     _integer(pro["max_page_bytes"], "proactive.max_page_bytes", 1024, 1048576)
     _integer(pro["max_page_chars"], "proactive.max_page_chars", 100, 10000)
+    panel = config["dashboard"]
+    if type(panel["enabled"]) is not bool:
+        _fail("dashboard.enabled", "必须为 true 或 false")
+    _text(panel["access_token"], "dashboard.access_token", allow_empty=True)
+    if panel["access_token"]:
+        _secret(panel["access_token"], "dashboard.access_token", 24)
+    _integer(panel["activity_limit"], "dashboard.activity_limit", 100, 10000)
+    stickers = config["stickers"]
+    if type(stickers["enabled"]) is not bool:
+        _fail("stickers.enabled", "必须为 true 或 false")
+    for key, root in (("builtin_dir", "assets"), ("upload_dir", "data")):
+        _text(stickers[key], f"stickers.{key}")
+        path = Path(stickers[key])
+        if path.is_absolute() or ".." in path.parts or len(path.parts) < 2 or path.parts[0] != root:
+            _fail(f"stickers.{key}", f"必须位于项目 {root} 目录内")
+    _integer(stickers["max_bytes"], "stickers.max_bytes", 1024, 5242880)
+    _number(stickers["min_interval_seconds"], "stickers.min_interval_seconds", 0.0)
     return config
 
 
