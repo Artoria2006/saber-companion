@@ -120,6 +120,37 @@ class PanelTests(unittest.TestCase):
         expected = datetime(2026, 10, 28, 8, tzinfo=chat.CHINA).timestamp()
         self.assertEqual(result["earliest_at"], expected)
 
+    def test_idle_timing_is_stable_and_matches_scheduler(self):
+        self.store.opt_in("100:u:300", True)
+        self.engine.update_controls("100:u:300", {"idle_minutes":15})
+        now = datetime(2026, 10, 27, 12, tzinfo=chat.CHINA)
+        with self.store.db() as db:
+            db.execute("UPDATE sessions SET last_user=?,last_attempt=0 WHERE key=?", (now.timestamp(),"100:u:300"))
+        state = self.store.get("100:u:300")
+        due = self.engine.next_contact_at(state)
+        self.assertGreaterEqual(due, now.timestamp()+15*60)
+        self.assertLessEqual(due, now.timestamp()+20*60)
+        self.assertEqual(chat.Engine(Store(self.store.path)).next_contact_at(state), due)
+        self.assertEqual(schedule(self.engine, state, now, chat.quiet)["earliest_at"], due)
+        self.assertFalse(chat.eligible(state, datetime.fromtimestamp(due-1, chat.CHINA), self.engine.policy(state)))
+        self.assertTrue(chat.eligible(state, datetime.fromtimestamp(due, chat.CHINA), self.engine.policy(state)))
+
+    def test_model_delay_varies_without_crossing_idle_floor(self):
+        policy = dict(chat.P, idle_minutes=15)
+        with patch.object(chat.random, "uniform", return_value=0.8):
+            earlier = chat.next_contact_delay(policy, {"next_delay_minutes":30})
+            self.assertEqual(chat.next_contact_delay(policy, {"next_delay_minutes":5}), 15*60)
+        with patch.object(chat.random, "uniform", return_value=1.2):
+            later = chat.next_contact_delay(policy, {"next_delay_minutes":30})
+        self.assertEqual(earlier, 24*60)
+        self.assertEqual(later, 36*60)
+
+    def test_planner_receives_session_timing_and_remaining_budget(self):
+        self.engine.update_controls("100:u:300", {"idle_minutes":15,"max_daily_attempts":8})
+        state = self.engine.effective_state(self.store.get("100:u:300"))
+        self.assertEqual(state["proactive_timing"]["idle_minutes"], 15)
+        self.assertEqual(state["proactive_timing"]["remaining_attempts"], 8)
+
     def test_memory_editor_does_not_delete_another_session_memory(self):
         self.post("/memories", {"session":"100:u:300","content":"喜欢红茶"})
         row = self.get("/memories?session=100:u:300").json()["items"][0]

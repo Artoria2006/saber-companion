@@ -14,8 +14,7 @@ ROOT = Path(__file__).resolve().parent
 def schedule(engine, state, now, quiet):
     policy = engine.policy(state)
     used = state["attempts"] if state["attempt_day"] == now.date().isoformat() else 0
-    earliest = max(max(state["last_user"], state["last_attempt"]) + policy["idle_minutes"] * 60,
-                   policy.get("snooze_until", 0))
+    earliest = engine.next_contact_at(state)
     if used >= policy["max_daily_attempts"]:
         tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         earliest = max(earliest, tomorrow.timestamp())

@@ -1,9 +1,11 @@
 """有界排队、持久记忆和用户主动开启的私聊陪伴。"""
 import asyncio
 import base64
+import hashlib
 import json
 import math
 import re
+import random
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -211,12 +213,17 @@ async def choose_activity(state, memories, force=False):
               "不要连续重复上次的主题。搜索词只含公开知识主题，不含用户姓名、QQ、私事或对话原文。"
               "浏览时选一个自己真正好奇的具体小主题，不把生活、科技、文化等大词堆成综合新闻搜索。"
               "仅输出 JSON：{\"mode\":\"chat或browse或skip\",\"query\":\"中文搜索词\",\"source\":0,"
-              "\"summary\":\"一句简短的选择说明，不要详细思维过程\",\"next_delay_minutes\":60}。"
+              "\"summary\":\"一句简短的选择说明，不要详细思维过程\",\"next_delay_minutes\":30}。"
               "下一次考虑联系的间隔可建议 5 到 240 分钟，实际仍遵守空闲阈值、预算和安静时段。"
+              "依据提供的空闲门槛、最近互动和剩余名额决定间隔，不要固定照抄示例数字。"
+              "恋人私聊可以自然想起一件小事再来聊；用户刚说忙、想休息或不想聊时，应延后或跳过。"
+              "有未完的话题可以较早考虑，没有话题或刚主动联系过则留些空间；不连续查岗或追问。"
               "summary 最多 30 个中文字，query 最多 20 个中文字，保持 JSON 简短完整。"
               "source 是未启用搜索时要读的来源编号；不能提供任意操作、私网地址或登录任务。")
     prompt = json.dumps({"interests": P["interests"], "sources": list(enumerate(P["sources"])),
                          "search_enabled": P["search_enabled"], "manual_test": force,
+                         "timing": state.get("proactive_timing", {"idle_minutes": P["idle_minutes"]}),
+                         "now": datetime.now(CHINA).isoformat(timespec="minutes"),
                          "saved_preferences": [x["content"] for x in list(memories)[-5:]]}, ensure_ascii=False)
     messages = fit(system, state["history"][-6:], prompt, M["context_tokens"] - 256)
     logger.info(f"[model] activity_plan estimated_tokens={tokens(messages)}")
@@ -248,13 +255,26 @@ def quiet(now, policy=None):
     return start <= hour < end if start < end else hour >= start or hour < end
 
 
+def contact_not_before(state, policy):
+    # 每轮空闲增加 0—5 分钟的稳定浮动；刷新面板或重启不会重新抽签。
+    anchor = max(state["last_user"], state["last_attempt"])
+    seed = f"{state.get('key', '')}:{anchor:.6f}".encode()
+    jitter = int.from_bytes(hashlib.sha256(seed).digest()[:4], "big") % 301
+    return max(anchor + policy["idle_minutes"] * 60 + jitter, policy.get("snooze_until", 0))
+
+
+def next_contact_delay(policy, plan):
+    # 模型建议只决定下一次判断时机；加入小幅浮动，始终守住空闲门槛。
+    suggested = plan.get("next_delay_minutes") or policy["idle_minutes"] * 1.5
+    return max(policy["idle_minutes"] * 60, min(240, suggested) * 60 * random.uniform(0.8, 1.2))
+
+
 def eligible(state, now, policy=None):
     policy = policy or P
     used = state["attempts"] if state["attempt_day"] == now.date().isoformat() else 0
     return (bool(state["proactive"]) and state["group_id"] is None and not quiet(now, policy)
             and used < policy["max_daily_attempts"]
-            and now.timestamp() >= policy.get("snooze_until", 0)
-            and now.timestamp() - max(state["last_user"], state["last_attempt"]) >= policy["idle_minutes"] * 60)
+            and now.timestamp() >= contact_not_before(state, policy))
 
 
 @dataclass
@@ -324,7 +344,15 @@ class Engine:
         prefs = self.store.preference("session:" + state["key"], {})
         last = self.store.preference("last_sticker:" + state["key"], 0)
         state["stickers_available"] = prefs.get("stickers_enabled", True) and time.time() - last >= ST["min_interval_seconds"]
+        policy = self.policy(state)
+        used = state["attempts"] if state["attempt_day"] == datetime.now(CHINA).date().isoformat() else 0
+        state["proactive_timing"] = {"idle_minutes": policy["idle_minutes"],
+                                     "remaining_attempts": max(0, policy["max_daily_attempts"] - used),
+                                     "quiet_start_hour": policy["quiet_start_hour"], "quiet_end_hour": policy["quiet_end_hour"]}
         return state
+
+    def next_contact_at(self, state):
+        return contact_not_before(state, self.policy(state))
 
     def pause(self, paused):
         self.store.set_preference("paused", paused)
@@ -635,8 +663,7 @@ class Engine:
             plan = {"mode": "chat", "query": "", "source": 0}
         logger.info(f"[proactive] activity={plan['mode']}")
         prefs = self.store.preference("session:" + job.key, {})
-        delay = max(policy["idle_minutes"], plan.get("next_delay_minutes", 0))
-        prefs["snooze_until"] = time.time() + delay * 60
+        prefs["snooze_until"] = time.time() + next_contact_delay(policy, plan)
         self.store.set_preference("session:" + job.key, prefs)
         self.record(job.key, "decision", "done", {"chat": "想找你聊聊", "browse": "想查点有趣的东西", "skip": "决定先不打扰"}[plan["mode"]],
                     {"mode": plan["mode"], "query": plan["query"], "explanation": plan.get("summary", ""), "next_consider_at": prefs["snooze_until"]})
