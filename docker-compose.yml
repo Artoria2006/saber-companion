@@ -1,0 +1,36 @@
+services:
+  init:
+    build: .
+    command: ["python", "bot.py", "--prepare"]
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+      - napcat_config:/napcat-config
+    restart: "no"
+
+  bot:
+    build: .
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+      - ./data:/app/data
+    restart: unless-stopped
+
+  napcat:
+    image: mlikiowa/napcat-docker:v4.18.41
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      bot:
+        condition: service_started
+    ports:
+      - "127.0.0.1:6099:6099"
+    volumes:
+      - qq_data:/app/.config/QQ
+      - napcat_config:/app/napcat/config
+    restart: unless-stopped
+
+volumes:
+  qq_data:
+  napcat_config:
