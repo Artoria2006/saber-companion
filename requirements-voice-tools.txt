@@ -1,0 +1,7 @@
+# 独立音频准备环境使用；不安装进 QQ 机器人的 .venv。
+# 本机已验证 GPU 组合为 torch 2.5.1+cu121、torchaudio 2.5.1+cu121。
+# 本文件不包含完整 GPT-SoVITS 推理依赖；不能据此宣称专属声线已部署。
+yt-dlp==2026.10.26
+demucs==4.1.0
+numpy==1.26.4
+soundfile==0.13.1
