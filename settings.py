@@ -46,7 +46,7 @@ DEFAULTS = {
                   "max_daily_attempts": 4, "quiet_start_hour": 22, "quiet_end_hour": 8,
                   "sources": ["https://sspai.com/feed", "https://www.gcores.com/rss", "https://www.ithome.com/rss/"],
                   "search_enabled": False,
-                  "search_domains": ["sspai.com", "gcores.com", "ithome.com", "zhihu.com", "guokr.com", "douban.com", "36kr.com", "huxiu.com", "thepaper.cn", "people.com.cn", "xinhuanet.com", "163.com", "sohu.com", "ifeng.com", "bilibili.com"],
+                  "search_domains": ["sspai.com", "gcores.com", "ithome.com", "zhihu.com", "guokr.com", "douban.com", "36kr.com", "huxiu.com", "thepaper.cn", "people.com.cn", "xinhuanet.com", "163.com", "sohu.com", "ifeng.com", "bilibili.com", "baidu.com", "qq.com"],
                   "interests": "国内生活、饮食、自然、科技、阅读、文化与有趣的小知识。不要因为 Saber 身份默认追踪 Fate、FGO 或周边商品；除非用户自己提起。",
                   "fetch_timeout_seconds": 12.0, "max_page_bytes": 262144, "max_page_chars": 3500},
 }

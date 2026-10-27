@@ -661,7 +661,8 @@ class Engine:
                 self.record(job.key, "reading", "done", "找到可阅读的内容", {k: reading.get(k) for k in ("url", "title", "published_at", "kind", "changed")} | {"excerpt": reading["text"][:600]})
             except Exception as exc:
                 logger.warning(f"[browse] failed type={type(exc).__name__}")
-                self.record(job.key, "reading", "failed", "这次没能读到网页，改为自然聊天", {"type": type(exc).__name__})
+                self.record(job.key, "reading", "failed", "这次没能读到网页，改为自然聊天",
+                            {"type": type(exc).__name__, "reason": str(exc) if isinstance(exc, ValueError) else "网络或搜索服务请求失败"})
         text = ("[助手后台触发，不是用户发言]\n北京时间：" + datetime.now(CHINA).isoformat(timespec="minutes")
                 + "。用户已开启主动陪伴。请像平常相处一样自然聊一句，不写成订阅简报。")
         if reading:

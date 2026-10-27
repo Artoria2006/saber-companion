@@ -322,6 +322,9 @@ class ChatTests(unittest.IsolatedAsyncioTestCase):
             await reading.search_domestic("茶", {"base_url":"https://api.other.com", "api_key":"other-key"}, chat.P)
         self.assertFalse(reading.domestic_result("https://sspai.com.evil.com/", chat.P["search_domains"]))
         self.assertTrue(reading.domestic_result("https://news.cri.cn/", chat.P["search_domains"]))
+        self.assertTrue(reading.domestic_result("https://baike.baidu.com/item/test", chat.P["search_domains"]))
+        self.assertTrue(reading.domestic_result("https://mp.weixin.qq.com/s/test", chat.P["search_domains"]))
+        self.assertFalse(reading.domestic_result("https://mp.weixin.qq.com.evil.com/", chat.P["search_domains"]))
 
     async def test_source_is_only_attached_when_used(self):
         text, use = chat.proactive_text('{"text":"只想聊聊天","use_source":false}', True)
