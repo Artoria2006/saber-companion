@@ -97,7 +97,7 @@ def install_dashboard(app, engine, config, quiet, tz):
                 "queue_limit": config["chat"]["queue_size"], "next_check_at": engine.next_check_at,
                 "sessions": sessions, "personas": list(config["personas"]), "model": config["model"]["model"],
                 "search_enabled": config["proactive"]["search_enabled"], "max_image_bytes": config["stickers"]["max_bytes"],
-                "voice": engine.speech.settings(), "voices": VOICES}
+                "voice": {k:v for k,v in engine.speech.settings().items() if k != "references"}, "voices": engine.speech.voices()}
 
     @router.get("/activities", dependencies=[Depends(authenticated)])
     async def activities(session: str = "", before: int = 0):
@@ -146,7 +146,8 @@ def install_dashboard(app, engine, config, quiet, tz):
         except Exception as exc:
             engine.record("", "speech", "failed", "管理面板语音试听失败", {"type":type(exc).__name__})
             raise HTTPException(503, "语音合成暂不可用，请检查 voice.enabled、网络与 [voice] 日志") from None
-        return Response(audio, media_type="audio/mpeg", headers={"Cache-Control":"no-store", "X-Content-Type-Options":"nosniff"})
+        kind = "audio/wav" if audio[:4]==b"RIFF" else "audio/mpeg"
+        return Response(audio, media_type=kind, headers={"Cache-Control":"no-store", "X-Content-Type-Options":"nosniff"})
 
     @router.get("/memories", dependencies=[Depends(authenticated)])
     async def memories(session: str):

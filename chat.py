@@ -106,6 +106,7 @@ def relationship_context(state):
         return ("当前关系：恋人私聊。用户已明确选择 Saber 作为温柔、亲近、有日常陪伴感的虚拟女友。"
                 "可以自然回应喜欢、想念与亲近，保留 Saber 的认真与克制。"
                 "用户主动请求拥抱时已建立虚构互动，直接温柔接住，不加‘只是动作、你不必配合、只能模拟’等出戏说明。"
+                "用户表达誓约时可以认真说‘我愿意’‘我答应你’，承诺珍惜相处和坦诚回应；不讥讽重复的表白，不自动劝用户把誓言改轻。"
                 "这些写作约束默默遵守，不把它们复述为对白；用户明确询问真实性时仍需诚实。")
     return "当前关系：普通私聊。温柔、自然地交流，关系依照本会话实际设定，不套用其他账号的恋人关系。"
 
@@ -127,6 +128,10 @@ async def answer(state, text, memories=(), proactive=False, spoken=False):
     if spoken:
         system += (f"\n这条回复准备合成为语音。请用自然口语说话，正文不超过 {min(V['max_chars'], 140)} 字，"
                    "少用排版和括号动作描述，不朗读网址或代码，不自称没有语音能力。不要为了声音刻意撒娇或机械报幕。")
+        if V.get("provider")=="gpt_sovits":
+            system += ("\n根据对话选择合适的语气参考，emotion 只能从这些名称中选择："+json.dumps(list(V["references"]))
+                       + "。输出 JSON：{\"text\":\"自然的回复\",\"emotion\":\"参考名称\",\"sticker\":\"\",\"use_source\":false}。"
+                       "安慰、想念可温柔，解释事情保持认真，晚安轻柔克制；语气标签不属于要朗读的正文。")
     notes = []
     for note in reversed(list(memories)):
         candidate = [note["content"], *notes]
@@ -157,6 +162,8 @@ async def answer(state, text, memories=(), proactive=False, spoken=False):
                    "不要使用‘这个时间，若你正空闲’‘公开页面有更新的消息’之类开场，不总以今天过得如何结尾。"
                    "不因自己是 Saber 就默认推送 Fate/FGO；用户未主动提起时不要延续旧的相关推送。"
                    "只概括，不长篇照抄。角色身份影响性格，不限制兴趣主题。")
+    if spoken and V.get("provider")=="gpt_sovits":
+        system += "\n最终 JSON 同时包含 text、emotion、sticker、use_source。emotion 使用上述可用参考名称，不输出解释或额外文字。"
     budget = M["context_tokens"] - M["max_output_tokens"]
     for attempt in range(3):
         messages = fit(system, state["history"], text, budget)
@@ -256,6 +263,14 @@ def message_payload(raw, has_source=False):
         return raw.strip(), has_source, ""
 
 
+def message_emotion(raw):
+    try:
+        value=json_object(raw).get("emotion","")
+        return value if isinstance(value,str) and value in ("neutral","warm","cheerful","serious","sleepy") else ""
+    except (ValueError,TypeError):
+        return ""
+
+
 def quiet(now, policy=None):
     policy = policy or P
     hour, start, end = now.hour, policy["quiet_start_hour"], policy["quiet_end_hour"]
@@ -298,6 +313,7 @@ class Job:
     force: bool = False
     kind: str = "chat"
     sticker_id: str = ""
+    test: bool = False
 
 
 class Engine:
@@ -422,15 +438,14 @@ class Engine:
                 raise ValueError("请先开启该会话的主动模式并取消全局暂停")
             if quiet(now, policy):
                 raise ValueError("现在是安静时段")
-            if state["attempt_day"] == now.date().isoformat() and state["attempts"] >= policy["max_daily_attempts"]:
-                raise ValueError("今日主动任务名额已用完，可在设置中调整上限")
         elif kind == "voice":
             if not self.speech.choose(Job(state["bot_id"], state["user_id"], None, key, "", time.time()), force=True):
                 raise ValueError("语音功能或该会话语音开关未开启")
         elif kind != "sticker" or not self.library.get(sticker_id):
             raise ValueError("表情不存在")
         job = Job(state["bot_id"], state["user_id"], None, key, "", time.time(), proactive=kind == "proactive",
-                  expected_last_user=state["last_user"], force=True, kind=kind, sticker_id=sticker_id)
+                  expected_last_user=state["last_user"], force=True, kind=kind, sticker_id=sticker_id,
+                  test=kind == "proactive")
         self.queue.put_nowait(job)
         if job.proactive:
             self.proactive_pending.add(key)
@@ -455,19 +470,33 @@ class Engine:
         return (P["enabled"] and not self.store.preference("paused", False) and state and state["proactive"]
                 and state["last_user"] == job.expected_last_user and not quiet(datetime.now(CHINA), self.policy(state)))
 
-    async def send(self, job, text, sticker_id="", force_sticker=False, voice=False):
+    async def send(self, job, text, sticker_id="", force_sticker=False, voice=False, emotion=""):
         audio = None
         if voice and self.speech.choose(job, force=True):
             if job.proactive and not self.still_wanted(job):
                 return None
             self.stage(job, "speech", "正在合成中文语音")
             try:
-                audio = await self.speech.synthesize(text)
-                self.record(job.key, "speech", "done", "中文语音已合成", {"bytes": len(audio), "voice": self.speech.settings()["voice"]})
+                provider=self.speech.settings().get("provider","edge")
+                auto_emotion=job.kind!="voice" and job.text!="/语音测试"
+                if provider=="gpt_sovits":
+                    audio = await self.speech.synthesize(text,auto_emotion=auto_emotion,emotion=emotion)
+                    selected_voice=self.speech.reference_name(text,auto_emotion,emotion)
+                else:
+                    audio = await self.speech.synthesize(text)
+                    selected_voice=self.speech.settings()["voice"]
+                self.record(job.key, "speech", "done", "中文语音已合成", {"bytes": len(audio), "voice":selected_voice,"profile":selected_voice,"provider":provider})
+                logger.info(f"[voice] synthesized provider={provider} bytes={len(audio)}")
             except Exception as exc:
                 logger.warning(f"[voice] synthesis_failed type={type(exc).__name__}")
-                self.record(job.key, "speech", "failed", "语音合成未完成，退回文字",
+                self.record(job.key, "speech", "failed", "语音合成未完成，准备回退",
                             {"type": type(exc).__name__, "reason": str(exc) if isinstance(exc, ValueError) else "语音服务网络错误或超时"})
+                if self.speech.settings().get("provider") == "gpt_sovits" and self.speech.settings().get("fallback_to_edge", True):
+                    try:
+                        audio = await self.speech.synthesize_edge(text)
+                        self.record(job.key,"speech","done","本地声线暂不可用，已改用通用中文女声",{"provider":"edge","fallback":True})
+                    except Exception as fallback_exc:
+                        logger.warning(f"[voice] fallback_failed type={type(fallback_exc).__name__}")
         async with self.send_lock:
             await asyncio.sleep(max(0, H["send_interval_seconds"] - (time.monotonic() - self.last_send)))
             if job.proactive and not self.still_wanted(job):
@@ -620,16 +649,13 @@ class Engine:
                     return "请先私聊发送 /主动开启。"
                 if quiet(datetime.now(CHINA), policy):
                     return "现在是安静时段，暂不安排主动测试。"
-                day = datetime.now(CHINA).date().isoformat()
-                if state["attempt_day"] == day and state["attempts"] >= policy["max_daily_attempts"]:
-                    return "今天的主动任务名额已用完，明天再试吧。"
                 if self.queue.full() or job.key in self.proactive_pending:
                     return "已有主动任务在等待，或当前队列已满，请稍后再试。"
                 test = Job(job.bot_id, job.user_id, None, job.key, "", time.time(),
-                           proactive=True, expected_last_user=state["last_user"], force=True)
+                           proactive=True, expected_last_user=state["last_user"], force=True, test=True)
                 self.queue.put_nowait(test)
                 self.proactive_pending.add(job.key)
-                return "已安排一次主动聊天测试，也计入今日名额。没有合适话题时，我可能选择不打扰。"
+                return "已安排一次主动聊天测试，不计入今日名额。没有合适话题时，我可能选择不打扰。"
             active = bool(state["proactive"]) and P["enabled"] and not self.store.preference("paused", False)
             return f"主动聊天：{'已开启' if active else '已关闭或暂停'}；空闲阈值 {policy['idle_minutes']} 分钟；每日最多 {policy['max_daily_attempts']} 次尝试；北京时间安静时段 {policy['quiet_start_hour']}:00—{policy['quiet_end_hour']}:00。"
         return None
@@ -667,6 +693,7 @@ class Engine:
         messages = None
         sticker_id = ""
         want_voice = False
+        emotion = ""
         if reply is None:
             self.store.processed(job.key)
             self.stage(job, "replying", "正在组织回复")
@@ -678,13 +705,14 @@ class Engine:
                 else:
                     raw, messages = await answer(state, text, self.store.memories(self.owner(job)))
                 reply, _, sticker_id = message_payload(raw)
+                emotion=message_emotion(raw)
             except Exception as exc:
                 want_voice = False
                 category, reply = error_info(exc)
                 logger.error(f"[model] failed session={job.key} category={category} type={type(exc).__name__} status={getattr(exc, 'status_code', None)}")
                 self.record(job.key, "model", "failed", "模型调用失败", {"category": category})
         reply = reply[:H["max_reply_chars"]]
-        await self.send(job, reply, sticker_id, voice=want_voice)
+        await self.send(job, reply, sticker_id, voice=want_voice, emotion=emotion)
         if messages:
             self.store.save_history(job.key, messages[1:] + [{"role": "assistant", "content": reply}], state["persona"], H["history_messages"])
 
@@ -694,7 +722,8 @@ class Engine:
             self.record(job.key, "cancelled", "cancelled", "主动条件已变化，本次任务取消")
             return
         day = datetime.now(CHINA).date().isoformat()
-        if not self.store.reserve_attempt(job.key, day, job.expected_last_user, policy["max_daily_attempts"]):
+        if not self.store.reserve_attempt(job.key, day, job.expected_last_user, policy["max_daily_attempts"],
+                                          count=not job.test):
             return
         self.stage(job, "planning", "正在选择想聊的话题")
         reading = None
@@ -761,7 +790,7 @@ class Engine:
                 return
             reply = reply[:limit - len(suffix)] + suffix
             self.record(job.key, "draft", "done", "已准备好一条想说的话", {"text": reply, "sticker": sticker_id})
-            if await self.send(job, reply, sticker_id, voice=want_voice) is None:
+            if await self.send(job, reply, sticker_id, voice=want_voice,emotion=message_emotion(raw)) is None:
                 return
             history = state["history"] + [
                 {"role": "user", "content": "[助手后台事件：用户已开启主动陪伴，本轮不是用户提问]"},

@@ -36,11 +36,12 @@ FIELDS = {
     "dashboard": {"enabled", "access_token", "activity_limit"},
     "stickers": {"enabled", "builtin_dir", "upload_dir", "max_bytes", "min_interval_seconds"},
     "voice": {"enabled", "voice", "rate_percent", "pitch_hz", "proactive_probability", "min_interval_seconds",
-              "max_chars", "max_bytes", "timeout_seconds"},
+              "max_chars", "max_bytes", "timeout_seconds", "provider", "gpt_sovits_url", "references", "fallback_to_edge"},
 }
 
 DEFAULTS = {
-    "voice": {"enabled": False, "voice": "zh-CN-XiaoxiaoNeural", "rate_percent": -8, "pitch_hz": -2,
+    "voice": {"enabled": False, "provider": "edge", "gpt_sovits_url": "http://host.docker.internal:9880",
+              "references": {}, "fallback_to_edge": True, "voice": "zh-CN-XiaoxiaoNeural", "rate_percent": -8, "pitch_hz": -2,
               "proactive_probability": 0.25, "min_interval_seconds": 3600.0, "max_chars": 180,
               "max_bytes": 2097152, "timeout_seconds": 25.0},
     "dashboard": {"enabled": True, "access_token": "", "activity_limit": 1000},
@@ -272,7 +273,32 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     voice = config["voice"]
     if type(voice["enabled"]) is not bool:
         _fail("voice.enabled", "必须为 true 或 false")
-    if voice["voice"] not in ("zh-CN-XiaoxiaoNeural", "zh-CN-XiaoyiNeural"):
+    if voice["provider"] not in ("edge", "gpt_sovits"):
+        _fail("voice.provider", "必须是 edge 或 gpt_sovits")
+    if type(voice["fallback_to_edge"]) is not bool:
+        _fail("voice.fallback_to_edge", "必须为 true 或 false")
+    _url(voice["gpt_sovits_url"], "voice.gpt_sovits_url", ("http",))
+    if urlsplit(voice["gpt_sovits_url"]).hostname not in ("127.0.0.1", "localhost", "host.docker.internal"):
+        _fail("voice.gpt_sovits_url", "本地推理地址必须使用 localhost、127.0.0.1 或 host.docker.internal")
+    if not isinstance(voice["references"], dict) or len(voice["references"]) > 8:
+        _fail("voice.references", "必须是最多八个参考音频配置的映射")
+    for name, reference in voice["references"].items():
+        if name not in ("neutral", "warm", "cheerful", "serious", "sleepy") or not isinstance(reference, dict):
+            _fail("voice.references", "支持 neutral、warm、cheerful、serious、sleepy 五种参考")
+        if not {"audio_path", "text", "language"} <= set(reference) or set(reference) - {"audio_path", "text", "language", "aux_audio_paths"}:
+            _fail("voice.references."+name, "必须同时包含 audio_path、text、language")
+        _text(reference["audio_path"], "voice.references."+name+".audio_path")
+        _text(reference["text"], "voice.references."+name+".text")
+        auxiliary = reference.get("aux_audio_paths", [])
+        if not isinstance(auxiliary, list) or len(auxiliary) > 5:
+            _fail("voice.references."+name+".aux_audio_paths", "必须是最多五个辅助音频路径的列表")
+        for path in auxiliary:
+            _text(path, "voice.references."+name+".aux_audio_paths")
+        if reference["language"] not in ("ja", "zh", "en"):
+            _fail("voice.references."+name+".language", "必须是 ja、zh 或 en")
+    if voice["provider"] == "gpt_sovits" and (not voice["references"] or voice["voice"] not in voice["references"]):
+        _fail("voice.voice", "使用 gpt_sovits 时必须选择已配置的参考音频名称")
+    if voice["provider"] == "edge" and voice["voice"] not in ("zh-CN-XiaoxiaoNeural", "zh-CN-XiaoyiNeural"):
         _fail("voice.voice", "必须是 zh-CN-XiaoxiaoNeural 或 zh-CN-XiaoyiNeural")
     _integer(voice["rate_percent"], "voice.rate_percent", -50, 25)
     _integer(voice["pitch_hz"], "voice.pitch_hz", -20, 20)

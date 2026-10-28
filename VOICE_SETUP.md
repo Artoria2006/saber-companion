@@ -1,39 +1,67 @@
-# Saber 专属声线：本地素材准备
+# 本地 GPT-SoVITS 声线
 
-当前 QQ 语音使用 edge-tts。GPT-SoVITS 官方源码已在本机克隆到 `D:\saber-voice\GPT-SoVITS`；尚未取得参考视频、确认音频或完成专属声线合成，因此没有切换机器人声线。
+本机已部署 GPT-SoVITS v2ProPlus，使用参考音频直接合成，无需为每个句子重新训练。它不是已经训练完成的 Saber 专用模型。日语参考可能把日语发音习惯带进中文；当前方案采用普通话主参考约束发音、日语辅助参考保留部分音色。音色相似度、情绪和普通话自然度仍需试听判断，自动转写正确不能替代听感验收。
 
-源码来源：https://github.com/RVC-Boss/GPT-SoVITS ，本次检查版本为 `b4570b876f5c086819ba84e3215472733c6a7b70`。运行环境、输入素材、基础权重与处理结果位于独立的 `D:\saber-voice`，不提交到本仓库。第三方程序和模型遵循各自许可。
+## 已验证的环境与文件
 
-## 1. 下载公开素材
+- Windows，Python 3.11.15，RTX 4060 Laptop 8 GB，torch/torchaudio 2.5.1+cu121。
+- 官方源码：https://github.com/RVC-Boss/GPT-SoVITS ，固定提交 `b4570b876f5c086819ba84e3215472733c6a7b70`。
+- 独立根目录 `D:\saber-voice`：`.venv` 为运行环境，`GPT-SoVITS` 为源码和基础权重，`input` 为用户提供的音轨，`processed` 为人声分离及转写，`references` 为参考与准确转写，`samples` 为试听结果，`logs` 为服务日志。
+- 基础模型与校验信息见 `scripts/download_gsv_models.py`；Windows 环境版本记录见 `requirements-gsv-windows.lock`。该锁文件用于已验证环境记录，不替代匹配显卡驱动与 CUDA 版 PyTorch 的安装。
+- 音轨来自用户本地提供的两个视频文件；不上传音频、参考转写、权重、聊天记录或登录数据。第三方源码、模型和素材遵循各自许可。
 
-本机已有独立环境与 yt-dlp 2026.10.26。PowerShell 执行：
+## 本机启动与停止
 
-```powershell
-& 'D:\saber qq\scripts\download_voice_sources.ps1'
-```
-
-脚本只下载指定的两个公开链接的音轨，保存至 `D:\saber-voice\input`。它不读取浏览器 Cookie、不更改代理、不处理验证码；下载失败会明确退出。
-
-2026-10-27 实测两个页面、公开元数据接口及标准 yt-dlp 命令均返回 HTTP 412，未下载到素材。遇到这种情况需要通过平台允许的方式取得本地文件，或提供已有文件路径。不能把代码已克隆当作模型已完成部署。
-
-GPT-SoVITS 不要求关闭代理。代码与模型下载、视频网站访问分别受网络条件影响；修改全局代理不保证能解决网站风控。本项目脚本不替使用者切换网络设置。
-
-独立环境已验证 torch 2.5.1+cu121、torchaudio 2.5.1+cu121 可调用 RTX 4060 Laptop。PyTorch 从本机已验证环境复制到新目录，未修改旧环境；其他音频准备工具版本记录在 requirements-voice-tools.txt。该环境尚不等于完整 GPT-SoVITS 推理环境，启动前仍需安装其余推理依赖并取得基础权重与参考素材。
-
-## 2. 从本地文件提取音轨
-
-先把本地文件放到 input 目录，将下面命令末尾替换为该文件的真实完整路径：
+Docker Desktop 先启动。PowerShell 在项目目录执行：
 
 ```powershell
-& 'D:\saber-voice\.venv\Scripts\python.exe' 'D:\saber qq\scripts\prepare_voice_audio.py' 'D:\saber-voice\input\sample.mp4' --duration 600
+& '.\scripts\start_gsv.ps1'
+Invoke-RestMethod http://127.0.0.1:9880/health
 ```
 
-这条命令处理从零秒开始的前 600 秒，默认保留原始立体声音轨，并按静音边界生成最多 20 个 3—9 秒候选单声道片段。`--start 60 --duration 120` 表示从一分钟处开始处理两分钟；单次上限 1800 秒。每次写入一个全新 processed 子目录，不覆盖或删除输入文件。
+启动脚本要求已经存在上述独立环境和模型；第一次加载需等待，日志路径会打印。健康检查返回 `ok: true` 后再启动机器人：
 
-FFmpeg 只能提取音轨，不能保证移除配乐。`--separate` 会调用独立环境中的 Demucs htdemucs 做人声分离，默认关闭。本机已安装 Demucs 4.1.0 并完成 GPU 人声分离与约 3.8 秒候选切片的真实验证；缓存位于 D 盘。其他机器需先安装 requirements-voice-tools.txt 和匹配的 PyTorch。分离输出包含所有人声，不会自动识别哪个人是 Saber，也无法保证完全去除配乐。
+```powershell
+docker compose build bot
+docker compose up -d --no-deps bot
+```
 
-## 3. 声线合成前的检查
+服务仅监听 `127.0.0.1:9880`，容器通过 `http://host.docker.internal:9880` 访问。没有安装 Windows 开机自启；电脑重启后需要重新运行启动脚本。停止时执行：
 
-在 manifest.json 中确认候选片段的说话人、准确转写、语言和情绪。日语参考合成中文需要跨语言推理，效果须实际试听。包含背景人声、角色重叠、喊叫或强烈混响的片段不适合作为日常聊天的唯一参考。
+```powershell
+& '.\scripts\stop_gsv.ps1'
+```
 
-安装基础模型、启动本机推理 API、完成试听与 QQ 语音发送验证后，才能切换机器人。当前运行中的 QQ 助手继续使用已验证的中文女声；视频、音频、权重、下载缓存和登录信息不进入 Git。
+只停止命令行匹配本项目路径的推理进程，不按 python.exe 名称批量结束程序。
+
+## 配置说明
+
+在 `config.toml` 的 `[voice]` 内设置以下字段；其他字段保留示例默认值。下面示例要求对应文件真实存在：
+
+```toml
+provider = "gpt_sovits" # 示例默认 edge；本地推理选 gpt_sovits
+voice = "warm" # 本地模式必须匹配 references 中的名称
+gpt_sovits_url = "http://host.docker.internal:9880" # 直接运行 Python 则用 http://127.0.0.1:9880
+references = { warm = { audio_path = "D:/saber-voice/references/chinese-anchor.wav", text = "我在呢。今天辛苦了，先歇一会儿吧。", language = "zh", aux_audio_paths = ["D:/saber-voice/references/warm.wav"] } }
+fallback_to_edge = true # 默认 true；本地合成失败尝试通用中文女声，并在日记标明回退
+timeout_seconds = 90 # 示例默认25；本机为模型加载和推理留90秒
+max_bytes = 5242880 # 示例默认2097152；本机提高到5 MiB
+```
+
+`audio_path` 是 Windows 推理服务看到的路径，不是 Docker 内路径。`text` 必须准确对应主参考说话内容；`language` 支持 zh、ja、en。`aux_audio_paths` 默认空列表，最多五个文件，仅作辅助音色参考，不需要其转写。服务限制所有参考文件都位于本机 `references` 目录。支持 neutral、warm、cheerful、serious、sleepy 五个名称，不要求全部配置。
+
+模型只选择已经配置的语气名称；参考片段的情绪并不保证能精确控制每句输出。语速继续有效，音调参数不用于本地引擎。普通回复以文字为主，明确要求声音时合成短回复，主动语音仍遵守原有概率与冷却。
+
+## 素材处理与验收
+
+公开下载脚本为 `scripts/download_voice_sources.ps1`。平台拒绝下载时会退出，不读取浏览器 Cookie 或处理验证码。已有文件无需重复下载。提取与分离：
+
+```powershell
+& 'D:\saber-voice\.venv\Scripts\python.exe' '.\scripts\prepare_voice_audio.py' 'D:\saber-voice\input\sample.mp4' --duration 600 --separate
+```
+
+FFmpeg 提取音轨；Demucs 分离人声，不能保证完全去除配乐。每次写入新目录，保留输入文件。转写工具 `scripts/transcribe_voice_sources.py` 使用本地 faster-whisper，自动结果需校对。选择单人、少混响、3—9 秒参考，避免把喊叫作为日常语音参考。
+
+打开面板的“记忆与设置”，保存声线后点“本机试听”，然后“发到 QQ 测试”。核对活动日记中的 provider/profile 与最终发送回执，确保没有把回退声线误认为本地合成。试听普通聊天、疑问、承诺与晚安等不同句子，尤其检查口音、漏字和长停顿。
+
+连接被拒绝：检查健康接口与推理日志。找不到参考：检查 Windows 路径及 references 目录。首次推理超时：先完成加载再试听。显存不足：关闭占用 GPU 的程序后重启本项目服务。普通话不自然：保留日语原参考，比较中文主参考加辅助音色的方案，不以转写正确宣称完全消除口音。

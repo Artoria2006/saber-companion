@@ -260,12 +260,32 @@ class ChatTests(unittest.IsolatedAsyncioTestCase):
             scheduled = self.engine.queue.get_nowait()
             self.assertTrue(scheduled.force)
             self.assertTrue(scheduled.proactive)
+            self.assertTrue(scheduled.test)
             self.engine.proactive_pending.clear()
             with self.store.db() as db:
                 db.execute("UPDATE sessions SET attempt_day=?,attempts=? WHERE key=?",
                            (datetime.now(chat.CHINA).date().isoformat(), chat.P['max_daily_attempts'], job.key))
-            self.assertIn("名额已用完", self.engine.command(job, self.store.get(job.key)))
-            self.assertTrue(self.engine.queue.empty())
+            self.assertIn("已安排", self.engine.command(job, self.store.get(job.key)))
+            scheduled = self.engine.queue.get_nowait()
+            self.assertTrue(scheduled.test)
+            self.engine.proactive_pending.clear()
+
+    async def test_manual_proactive_test_does_not_consume_daily_quota(self):
+        self.store.touch("100:u:300", "100", 300, None, "assistant")
+        self.store.opt_in("100:u:300", True)
+        state = self.store.get("100:u:300")
+        job = chat.Job("100", 300, None, state["key"], "", time.time(), proactive=True,
+                       expected_last_user=state["last_user"], force=True, test=True)
+        with self.store.db() as db:
+            db.execute("UPDATE sessions SET attempt_day=?,attempts=? WHERE key=?",
+                       (datetime.now(chat.CHINA).date().isoformat(), chat.P["max_daily_attempts"], job.key))
+        self.choice.return_value = {"mode": "chat", "query": "", "source": 0}
+        answer = AsyncMock(return_value=('{"text":"在忙吗？","use_source":false}', []))
+        with patch.object(chat, "get_bot", return_value=self.bot), patch.object(chat, "quiet", return_value=False), \
+                patch.object(chat, "answer", answer), patch.dict(chat.H, send_interval_seconds=0):
+            await self.engine.process(job)
+        self.assertEqual(self.store.get(job.key)["attempts"], chat.P["max_daily_attempts"])
+        self.bot.send_private_msg.assert_awaited_once()
 
     async def test_activity_parser_and_actual_model_choice(self):
         plan = chat.parse_activity('{"mode":"skip"}', 3, force=True)

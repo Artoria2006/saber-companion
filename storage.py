@@ -119,18 +119,22 @@ class Store:
             return [dict(r) for r in db.execute(
                 "SELECT * FROM sessions WHERE proactive=1 AND group_id IS NULL ORDER BY last_attempt")]
 
-    def reserve_attempt(self, key, day, expected_last_user, daily_limit):
+    def reserve_attempt(self, key, day, expected_last_user, daily_limit, count=True):
         # 在模型请求之前持久化名额；即使请求失败或决定不打扰，也计入调用上限。
+        # 手动测试 count=False 时只更新时间戳，不占用每日名额。
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM sessions WHERE key=?", (key,)).fetchone()
             if not row or not row["proactive"] or row["last_user"] != expected_last_user:
                 return False
             attempts = row["attempts"] if row["attempt_day"] == day else 0
-            if attempts >= daily_limit:
+            if count and attempts >= daily_limit:
                 return False
-            db.execute("UPDATE sessions SET attempts=?,attempt_day=?,last_attempt=? WHERE key=?",
-                       (attempts + 1, day, time.time(), key))
+            if count:
+                db.execute("UPDATE sessions SET attempts=?,attempt_day=?,last_attempt=? WHERE key=?",
+                           (attempts + 1, day, time.time(), key))
+            else:
+                db.execute("UPDATE sessions SET last_attempt=? WHERE key=?", (time.time(), key))
         return True
 
     def page_changed(self, owner, url, digest):

@@ -15,3 +15,12 @@ napcat_config/
 .pytest_cache/
 .coverage
 htmlcov/
+# 声线素材与权重保留在本地，避免意外上传。
+*.ckpt
+*.pth
+*.safetensors
+*.onnx
+*.m4a
+*.wav
+*.mp3
+*.mp4
