@@ -9,6 +9,7 @@
 !dashboard.py
 !speech.py
 !recognition.py
+!continuity.py
 !web/
 !web/**
 !assets/

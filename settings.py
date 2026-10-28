@@ -35,6 +35,8 @@ FIELDS = {
                   "max_page_bytes", "max_page_chars", "search_enabled", "search_domains", "interests"},
     "dashboard": {"enabled", "access_token", "activity_limit"},
     "asr": {"enabled", "url", "max_bytes", "max_seconds", "timeout_seconds", "min_avg_logprob"},
+    "summary": {"enabled","trigger_messages","keep_recent_messages","max_chars","model","input_tokens","output_tokens","timeout_seconds","check_seconds","retry_seconds","archive_turns"},
+    "mood": {"enabled","baseline","negative_delta","positive_delta","apology_delta","recovery_per_hour"},
     "stickers": {"enabled", "builtin_dir", "upload_dir", "max_bytes", "min_interval_seconds"},
     "voice": {"enabled", "voice", "rate_percent", "pitch_hz", "proactive_probability", "min_interval_seconds",
               "max_chars", "max_bytes", "timeout_seconds", "provider", "gpt_sovits_url", "references", "fallback_to_edge",
@@ -42,6 +44,10 @@ FIELDS = {
 }
 
 DEFAULTS = {
+    "summary": {"enabled":False,"trigger_messages":20,"keep_recent_messages":8,"max_chars":1200,
+                "model":"","input_tokens":6000,"output_tokens":800,"timeout_seconds":45.0,
+                "check_seconds":30.0,"retry_seconds":300.0,"archive_turns":200},
+    "mood": {"enabled":False,"baseline":65,"negative_delta":12,"positive_delta":4,"apology_delta":10,"recovery_per_hour":6.0},
     "asr": {"enabled":False,"url":"http://host.docker.internal:9881","max_bytes":8388608,
             "max_seconds":60.0,"timeout_seconds":45.0,"min_avg_logprob":-1.0},
     "voice": {"enabled": False, "provider": "edge", "gpt_sovits_url": "http://host.docker.internal:9880",
@@ -334,6 +340,22 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         _number(asr[key], "asr."+key, lower)
         if asr[key] > upper:
             _fail("asr."+key, f"不能超过 {upper}")
+    summary=config['summary'];mood=config['mood']
+    for name,section in (('summary',summary),('mood',mood)):
+        if type(section['enabled']) is not bool:_fail(name+'.enabled','必须为 true 或 false')
+    for key,minimum,maximum in (('trigger_messages',10,200),('keep_recent_messages',2,100),('max_chars',200,3000),('input_tokens',1024,64000),('output_tokens',100,2000),('archive_turns',0,2000)):
+        _integer(summary[key],'summary.'+key,minimum,maximum)
+    if summary['trigger_messages']%2 or summary['keep_recent_messages']%2 or summary['keep_recent_messages']>=summary['trigger_messages']:
+        _fail('summary.keep_recent_messages','触发条数和保留条数必须为偶数，且保留条数小于触发条数')
+    if summary['enabled'] and summary['input_tokens']+summary['output_tokens']>config['model']['context_tokens']:
+        _fail('summary.input_tokens','摘要输入与输出预算之和不能超过 model.context_tokens')
+    _text(summary['model'],'summary.model',allow_empty=True)
+    for key,minimum in (('timeout_seconds',1),('check_seconds',5),('retry_seconds',30)):
+        _number(summary[key],'summary.'+key,minimum)
+    _integer(mood['baseline'],'mood.baseline',30,90)
+    for key in ('negative_delta','positive_delta','apology_delta'):_integer(mood[key],'mood.'+key,1,20)
+    _number(mood['recovery_per_hour'],'mood.recovery_per_hour',0)
+    if mood['recovery_per_hour']>30:_fail('mood.recovery_per_hour','不能超过每小时30点')
     return config
 
 

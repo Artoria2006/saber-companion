@@ -12,6 +12,14 @@ from speech import SAMPLE, VOICES
 ROOT = Path(__file__).resolve().parent
 
 
+class RevalidatedStaticFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        response=await super().get_response(path,scope)
+        # 更新面板后必须重新校验脚本，防止新卡片配上旧缓存脚本而不刷新。
+        response.headers['Cache-Control']='no-cache, must-revalidate'
+        return response
+
+
 def schedule(engine, state, now, quiet):
     policy = engine.policy(state)
     used = state["attempts"] if state["attempt_day"] == now.date().isoformat() else 0
@@ -155,6 +163,29 @@ def install_dashboard(app, engine, config, quiet, tz):
         owner = f"{session}:member:{state['user_id']}"
         return {"items": engine.store.memories(owner), "history": state["history"][-10:]}
 
+    @router.get('/continuity', dependencies=[Depends(authenticated)])
+    async def continuity_status(session: str):
+        return engine.continuity.view(checked(session))
+
+    @router.post('/continuity', dependencies=[Depends(authenticated)])
+    async def continuity_control(request: Request):
+        values=await body(request)
+        key=values.get('session')
+        if not isinstance(key,str) or len(key)>100:raise HTTPException(400,'会话标识无效')
+        state=checked(key)
+        if state['group_id'] is not None:raise HTTPException(400,'自动摘要与角色状态目前只用于私聊')
+        owner=engine.continuity.ensure(state)
+        action=values.get('action')
+        if action=='clear_summary' and owner and engine.continuity.summary['enabled']:
+            engine.store.clear_summary(owner,engine.continuity.summary['keep_recent_messages']//2)
+            engine.record(key,'summary','done','管理面板已清空自动摘要及较早归档')
+        elif action=='reset_mood' and owner and engine.continuity.mood['enabled']:
+            engine.store.reset_mood(owner,engine.continuity.mood['baseline'])
+            engine.record(key,'mood','done','管理面板已恢复角色平静状态')
+        else:
+            raise HTTPException(400,'操作无效或功能未启用')
+        return {'ok':True}
+
     @router.post("/memories", dependencies=[Depends(authenticated)])
     async def update_memory(request: Request):
         values = await body(request)
@@ -202,7 +233,7 @@ def install_dashboard(app, engine, config, quiet, tz):
         return {"ok": True, "id": sticker_id}
 
     app.include_router(router)
-    app.mount("/panel/static", StaticFiles(directory=ROOT / "web"), name="saber-panel-static")
+    app.mount("/panel/static", RevalidatedStaticFiles(directory=ROOT / "web"), name="saber-panel-static")
 
     @app.get("/panel/", include_in_schema=False)
     async def index():
