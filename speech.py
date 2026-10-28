@@ -81,13 +81,20 @@ class Speech:
     def reference_name(self,text,auto_emotion=False,emotion=""):
         config=self.settings()
         name=config["voice"]
-        if auto_emotion:
-            if emotion in config["references"]:
-                return emotion
-            for key, words in (("sleepy",("晚安","睡吧")),("warm",("抱抱","辛苦","陪着你","别难过")),("cheerful",("太好了","好开心"))):
-                if key in config["references"] and any(word in text for word in words):
-                    return key
+        if auto_emotion and not config.get("lock_reference",False):
+            style=self.emotion_name(text,emotion)
+            if style in config["references"]:
+                return style
         return name
+
+    def emotion_name(self,text,emotion=""):
+        if emotion in EMOTIONS:
+            return emotion
+        for key, words in (("sleepy",("晚安","睡吧")),("warm",("抱抱","辛苦","陪着你","别难过")),("cheerful",("太好了","好开心"))):
+            if any(word in text for word in words):
+                return key
+        name=self.settings()["voice"]
+        return name if name in EMOTIONS else "neutral"
 
     async def synthesize_gsv(self, text, auto_emotion=False, emotion=""):
         config = self.settings()
@@ -96,9 +103,15 @@ class Speech:
         # 使用明确配置的不同语气参考；没有对应素材时保持选定声线。
         name = self.reference_name(text,auto_emotion,emotion)
         ref = config["references"][name]
+        # 锁定同一组参考时仅轻微改变节奏，不因语气标签更换音色。
+        rate=config["rate_percent"]
+        if auto_emotion:
+            rate+=config.get("emotion_rates",{}).get(self.emotion_name(text,emotion),0)
+        rate=max(-50,min(25,rate))
         payload = {"text":text,"text_lang":"all_zh","ref_audio_path":ref["audio_path"],"prompt_text":ref["text"],
                    "prompt_lang":("all_"+ref["language"] if ref["language"] in ("ja","zh") else "en"),"media_type":"wav","streaming_mode":False,"text_split_method":"cut5",
-                   "batch_size":1,"parallel_infer":True,"speed_factor":1 + config["rate_percent"]/100,
+                   "batch_size":1,"parallel_infer":True,"speed_factor":1 + rate/100,
+                   "fragment_interval":config.get("fragment_interval_seconds",0.3),
                    "aux_ref_audio_paths":ref.get("aux_audio_paths",[])}
         async def collect():
             async with self.semaphore, httpx.AsyncClient(timeout=config["timeout_seconds"],trust_env=False) as client:

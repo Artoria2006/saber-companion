@@ -36,12 +36,14 @@ FIELDS = {
     "dashboard": {"enabled", "access_token", "activity_limit"},
     "stickers": {"enabled", "builtin_dir", "upload_dir", "max_bytes", "min_interval_seconds"},
     "voice": {"enabled", "voice", "rate_percent", "pitch_hz", "proactive_probability", "min_interval_seconds",
-              "max_chars", "max_bytes", "timeout_seconds", "provider", "gpt_sovits_url", "references", "fallback_to_edge"},
+              "max_chars", "max_bytes", "timeout_seconds", "provider", "gpt_sovits_url", "references", "fallback_to_edge",
+              "lock_reference", "emotion_rates", "fragment_interval_seconds"},
 }
 
 DEFAULTS = {
     "voice": {"enabled": False, "provider": "edge", "gpt_sovits_url": "http://host.docker.internal:9880",
-              "references": {}, "fallback_to_edge": True, "voice": "zh-CN-XiaoxiaoNeural", "rate_percent": -8, "pitch_hz": -2,
+              "references": {}, "fallback_to_edge": True, "lock_reference": False, "emotion_rates": {},
+              "fragment_interval_seconds": 0.3, "voice": "zh-CN-XiaoxiaoNeural", "rate_percent": -8, "pitch_hz": -2,
               "proactive_probability": 0.25, "min_interval_seconds": 3600.0, "max_chars": 180,
               "max_bytes": 2097152, "timeout_seconds": 25.0},
     "dashboard": {"enabled": True, "access_token": "", "activity_limit": 1000},
@@ -277,6 +279,15 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         _fail("voice.provider", "必须是 edge 或 gpt_sovits")
     if type(voice["fallback_to_edge"]) is not bool:
         _fail("voice.fallback_to_edge", "必须为 true 或 false")
+    if type(voice["lock_reference"]) is not bool:
+        _fail("voice.lock_reference", "必须为 true 或 false")
+    if not isinstance(voice["emotion_rates"], dict) or set(voice["emotion_rates"]) - {"neutral", "warm", "cheerful", "serious", "sleepy"}:
+        _fail("voice.emotion_rates", "只能包含 neutral、warm、cheerful、serious、sleepy")
+    for name, rate in voice["emotion_rates"].items():
+        _integer(rate, "voice.emotion_rates."+name, -10, 10)
+    _number(voice["fragment_interval_seconds"], "voice.fragment_interval_seconds", 0.1)
+    if voice["fragment_interval_seconds"] > 1:
+        _fail("voice.fragment_interval_seconds", "不能超过 1 秒")
     _url(voice["gpt_sovits_url"], "voice.gpt_sovits_url", ("http",))
     if urlsplit(voice["gpt_sovits_url"]).hostname not in ("127.0.0.1", "localhost", "host.docker.internal"):
         _fail("voice.gpt_sovits_url", "本地推理地址必须使用 localhost、127.0.0.1 或 host.docker.internal")

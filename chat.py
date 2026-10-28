@@ -128,10 +128,15 @@ async def answer(state, text, memories=(), proactive=False, spoken=False):
     if spoken:
         system += (f"\n这条回复准备合成为语音。请用自然口语说话，正文不超过 {min(V['max_chars'], 140)} 字，"
                    "少用排版和括号动作描述，不朗读网址或代码，不自称没有语音能力。不要为了声音刻意撒娇或机械报幕。")
+        system += ("\n像当面接话，先回应用户此刻的情绪，再说具体想说的话。通常用一到三句短句，长短自然变化。"
+                   "使用正常逗号、句号和问号帮助停顿；不要堆省略号、感叹号或语气词，也不要输出情绪舞台指示。"
+                   "温柔体现为认真听懂和具体回应，不每次套用‘辛苦了、休息吧、我会陪着你’，不把回复写成安慰广播。")
         if V.get("provider")=="gpt_sovits":
             system += ("\n根据对话选择合适的语气参考，emotion 只能从这些名称中选择："+json.dumps(list(V["references"]))
                        + "。输出 JSON：{\"text\":\"自然的回复\",\"emotion\":\"参考名称\",\"sticker\":\"\",\"use_source\":false}。"
                        "安慰、想念可温柔，解释事情保持认真，晚安轻柔克制；语气标签不属于要朗读的正文。")
+            if V.get("lock_reference",False):
+                system += "\n声线参考已锁定，emotion 只调整说话节奏；不要为了模拟情绪故意错字、拖长音或重复字。"
     notes = []
     for note in reversed(list(memories)):
         candidate = [note["content"], *notes]
@@ -485,7 +490,11 @@ class Engine:
                 else:
                     audio = await self.speech.synthesize(text)
                     selected_voice=self.speech.settings()["voice"]
-                self.record(job.key, "speech", "done", "中文语音已合成", {"bytes": len(audio), "voice":selected_voice,"profile":selected_voice,"provider":provider})
+                detail={"bytes":len(audio),"voice":selected_voice,"profile":selected_voice,"provider":provider}
+                if provider=="gpt_sovits":
+                    detail.update(emotion=self.speech.emotion_name(text,emotion) if auto_emotion else "",
+                                  reference_locked=self.speech.settings().get("lock_reference",False))
+                self.record(job.key, "speech", "done", "中文语音已合成", detail)
                 logger.info(f"[voice] synthesized provider={provider} bytes={len(audio)}")
             except Exception as exc:
                 logger.warning(f"[voice] synthesis_failed type={type(exc).__name__}")

@@ -58,6 +58,25 @@ class LocalVoiceTests(unittest.IsolatedAsyncioTestCase):
             with patch("speech.httpx.AsyncClient",lambda **kwargs:original(transport=transport,**kwargs)):
                 with self.assertRaises(ValueError):await self.speech.synthesize("你好。")
 
+    async def test_locked_reference_changes_delivery_without_changing_voice(self):
+        self.speech.config.update(lock_reference=True,rate_percent=0,emotion_rates={"warm":-2,"cheerful":3},fragment_interval_seconds=0.18)
+        captured=[];buffer=io.BytesIO()
+        with wave.open(buffer,'wb') as out:
+            out.setnchannels(1);out.setsampwidth(2);out.setframerate(8000);out.writeframes(b'\0\x10'*3200)
+        def handler(request):
+            captured.append(json.loads(request.content))
+            return httpx.Response(200,content=buffer.getvalue())
+        original=httpx.AsyncClient
+        with patch("speech.httpx.AsyncClient",lambda **kwargs:original(transport=httpx.MockTransport(handler),**kwargs)):
+            await self.speech.synthesize("我听着呢。",True,"warm")
+            await self.speech.synthesize("真好。",True,"cheerful")
+            await self.speech.synthesize("试听保持手动语速。")
+            self.speech.config["rate_percent"]=25
+            await self.speech.synthesize("真好。",True,"cheerful")
+        self.assertEqual([x['ref_audio_path'] for x in captured],[config()['references']['neutral']['audio_path']]*4)
+        self.assertEqual([x['speed_factor'] for x in captured],[0.98,1.03,1.0,1.25])
+        self.assertTrue(all(x['fragment_interval']==0.18 for x in captured))
+
     def test_switching_provider_does_not_reuse_incompatible_saved_voice(self):
         self.store.set_preference("voice_settings",{"voice":"zh-CN-XiaoyiNeural"})
         self.assertEqual(self.speech.settings()["voice"],"neutral")
@@ -117,6 +136,12 @@ class LocalConfigTests(unittest.TestCase):
         for paths in ("file.wav", ["a.wav"]*6, [42], [""]):
             value=self.valid_config()
             value["voice"]["references"]["warm"]["aux_audio_paths"]=paths
+            with self.assertRaises(ConfigError):validate_config(value)
+
+    def test_delivery_settings_reject_invalid_values(self):
+        for changes in ({"lock_reference":"true"},{"emotion_rates":{"warm":True}},{"emotion_rates":{"warm":11}},
+                        {"emotion_rates":{"unknown":0}},{"fragment_interval_seconds":0},{"fragment_interval_seconds":float('nan')}):
+            value=self.valid_config();value['voice'].update(changes)
             with self.assertRaises(ConfigError):validate_config(value)
 
 

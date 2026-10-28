@@ -235,6 +235,9 @@ provider = "edge" # 默认通用在线女声；专属声线部署完成后可设
 gpt_sovits_url = "http://host.docker.internal:9880" # Docker 访问本机推理；直接运行 Python 时使用 http://127.0.0.1:9880
 references = {} # 默认无参考；名称映射到 audio_path、text、language，可加 aux_audio_paths 列表（最多5个）；详见 VOICE_SETUP.md
 fallback_to_edge = true # 默认本地推理故障时改用通用女声，日记明确记录；仍失败则退回文字
+lock_reference = false # 默认随语气选参考；设为 true 后始终使用 voice 对应参考，保持音色
+emotion_rates = {} # 默认无额外变化；可填写 { warm = -2, cheerful = 3, sleepy = -4 }，各项为语速百分点，允许-10到10
+fragment_interval_seconds = 0.3 # 本地引擎分段间隔默认0.3秒，允许0.1到1秒；只影响分段边界，不控制每个逗号
 enabled = false # 默认关闭；开启后将待朗读正文发送给微软 Edge 在线朗读服务，无须额外 API Key
 voice = "zh-CN-XiaoxiaoNeural" # 默认晓晓中文女声；另一选项 zh-CN-XiaoyiNeural（晓伊）
 rate_percent = -8 # 默认语速降低 8%，允许 -50 到 25
