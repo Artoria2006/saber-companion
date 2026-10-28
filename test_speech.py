@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 from test_chat import chat, private
 import test_dashboard as paneltests
 from nonebot.adapters.onebot.v11 import Message
-from speech import Speech, requested
+from speech import Speech, requested, spoken_text
 from storage import Store
 
 
@@ -29,6 +29,10 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(requested(text),text)
         for text in ("你好", "语音设置在哪", "不要发语音", "不想听你的声音", "别用语音回复我"):
             self.assertFalse(requested(text),text)
+
+    def test_spoken_text_removes_only_stage_directions(self):
+        self.assertEqual(spoken_text('（轻笑）我在呢。（今天周三）'), '我在呢。（今天周三）')
+        self.assertEqual(spoken_text('**晚安**，先休息。'), '晚安，先休息。')
 
     def test_automatic_voice_respects_scope_probability_and_cooldown(self):
         self.assertFalse(self.engine.speech.choose(self.job))

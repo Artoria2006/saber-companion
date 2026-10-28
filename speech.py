@@ -26,6 +26,12 @@ def speakable(text):
     return bool(text.strip()) and not re.search(r"https?://|```", text)
 
 
+def spoken_text(text):
+    # 只去掉纯表演标记和排版符号，保留有实际信息的括号内容。
+    text = re.sub(r'[（(](?:轻笑|笑|微笑|低声|轻声|温柔地|停顿|叹气)[）)]', '', text)
+    return re.sub(r'[*#_`<>]', '', text).strip()
+
+
 class Speech:
     def __init__(self, config, store):
         self.config, self.store = dict(config), store
@@ -96,10 +102,15 @@ class Speech:
         name=self.settings()["voice"]
         return name if name in EMOTIONS else "neutral"
 
-    async def synthesize_gsv(self, text, auto_emotion=False, emotion=""):
+    async def synthesize_gsv(self, text, auto_emotion=False, emotion="", preview_variant="baseline"):
         config = self.settings()
         if not config["enabled"] or not speakable(text) or len(text) > config["max_chars"]:
             raise ValueError("语音未开启或正文不适合朗读")
+        text = spoken_text(text)
+        if not text:
+            raise ValueError("朗读正文为空")
+        if preview_variant not in ('baseline','soft'):
+            raise ValueError('试听版本不存在')
         # 使用明确配置的不同语气参考；没有对应素材时保持选定声线。
         name = self.reference_name(text,auto_emotion,emotion)
         ref = config["references"][name]
@@ -107,11 +118,13 @@ class Speech:
         rate=config["rate_percent"]
         if auto_emotion:
             rate+=config.get("emotion_rates",{}).get(self.emotion_name(text,emotion),0)
+        if preview_variant == 'soft':
+            rate -= 3
         rate=max(-50,min(25,rate))
         payload = {"text":text,"text_lang":"all_zh","ref_audio_path":ref["audio_path"],"prompt_text":ref["text"],
                    "prompt_lang":("all_"+ref["language"] if ref["language"] in ("ja","zh") else "en"),"media_type":"wav","streaming_mode":False,"text_split_method":"cut5",
                    "batch_size":1,"parallel_infer":True,"speed_factor":1 + rate/100,
-                   "fragment_interval":config.get("fragment_interval_seconds",0.3),
+                   "fragment_interval":0.28 if preview_variant=='soft' else config.get("fragment_interval_seconds",0.3),
                    "aux_ref_audio_paths":ref.get("aux_audio_paths",[])}
         async def collect():
             async with self.semaphore, httpx.AsyncClient(timeout=config["timeout_seconds"],trust_env=False) as client:

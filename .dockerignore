@@ -11,6 +11,7 @@
 !recognition.py
 !continuity.py
 !harness.py
+!desktop_bridge.py
 !web/
 !web/**
 !assets/

@@ -147,7 +147,8 @@ def install_dashboard(app, engine, config, quiet, tz):
     @router.get('/tasks', dependencies=[Depends(authenticated)])
     async def tasks():
         return {'items':engine.harness.items(), 'automatic':engine.store.preference('harness:auto', False),
-                'paused':engine.store.preference('paused', False)}
+                'paused':engine.store.preference('paused', False), 'desktop_enabled':engine.store.preference('desktop:enabled', False),
+                'desktop_auto':engine.store.preference('desktop:auto', False)}
 
     @router.post('/tasks', dependencies=[Depends(authenticated)])
     async def task_control(request: Request):
@@ -155,6 +156,18 @@ def install_dashboard(app, engine, config, quiet, tz):
         try:
             if values.get('action') == 'stop':
                 return engine.harness.stop(str(values.get('id', '')))
+            if values.get('action') == 'desktop':
+                enabled = values.get('enabled')
+                if type(enabled) is not bool:raise ValueError('开关必须是布尔值')
+                engine.store.set_preference('desktop:enabled',enabled)
+                engine.record('', 'control', 'done', '已开启电脑工具' if enabled else '已关闭电脑工具')
+                return {'ok':True}
+            if values.get('action') == 'desktop_auto':
+                enabled = values.get('enabled')
+                if type(enabled) is not bool:raise ValueError('开关必须是布尔值')
+                engine.store.set_preference('desktop:auto',enabled)
+                engine.record('', 'control', 'done', '已开启自主桌面操作' if enabled else '已关闭自主桌面操作')
+                return {'ok':True}
             if values.get('action') == 'automatic':
                 enabled = values.get('enabled')
                 if type(enabled) is not bool:
@@ -190,12 +203,17 @@ def install_dashboard(app, engine, config, quiet, tz):
         return FileResponse(path, media_type='text/plain', filename=path.name)
 
     @router.post("/voice/preview", dependencies=[Depends(authenticated)])
-    async def voice_preview():
+    async def voice_preview(variant: str = 'baseline'):
+        if variant not in ('baseline','soft'):
+            raise HTTPException(400, '试听版本不存在')
+        if variant == 'soft' and engine.speech.settings().get('provider') != 'gpt_sovits':
+            raise HTTPException(400, '柔和对照需要本机 GPT-SoVITS')
         if time.time() - engine.speech.preview_at < 10:
             raise HTTPException(429, "请等待十秒再试听")
         engine.speech.preview_at = time.time()
         try:
-            audio = await engine.speech.synthesize(SAMPLE)
+            audio = await (engine.speech.synthesize_gsv(SAMPLE, preview_variant='soft') if variant == 'soft'
+                           else engine.speech.synthesize(SAMPLE))
         except Exception as exc:
             engine.record("", "speech", "failed", "管理面板语音试听失败", {"type":type(exc).__name__})
             raise HTTPException(503, "语音合成暂不可用，请检查 voice.enabled、网络与 [voice] 日志") from None

@@ -77,13 +77,20 @@ $('voiceForm').oninput=()=>state.voiceDirty=true;
 $('voiceForm').onsubmit=async e=>{e.preventDefault();try{await control('voice_settings',{voice:$('voiceSelect').value,rate_percent:Number($('voiceRate').value),pitch_hz:Number($('voicePitch').value),proactive_probability:Number($('voiceProbability').value)});state.voiceDirty=false;await refresh();toast('声音设置已保存。');}catch(error){toast(error.message);}};
 $('sendVoiceTest').onclick=async()=>{try{await control('voice_test');toast('语音测试已排队，会发送到选中的私聊。');}catch(error){toast(error.message);}};
 $('previewVoice').onclick=async()=>{const button=$('previewVoice');button.disabled=true;try{const r=await fetch('/panel/api/voice/preview',{method:'POST',headers:{Authorization:'Bearer '+state.token}});if(!r.ok){let detail='试听失败';try{detail=(await r.json()).detail||detail;}catch{}throw new Error(detail);}const player=$('voicePlayer');if(player.dataset.blob)URL.revokeObjectURL(player.dataset.blob);const url=URL.createObjectURL(await r.blob());player.dataset.blob=url;player.src=url;player.hidden=false;await player.play();}catch(error){toast(error.message);}finally{button.disabled=false;}};
+$('previewVoiceSoft').onclick=async()=>{const button=$('previewVoiceSoft');button.disabled=true;try{const r=await fetch('/panel/api/voice/preview?variant=soft',{method:'POST',headers:{Authorization:'Bearer '+state.token}});if(!r.ok){let detail='试听失败';try{detail=(await r.json()).detail||detail;}catch{}throw new Error(detail);}const player=$('voicePlayer');if(player.dataset.blob)URL.revokeObjectURL(player.dataset.blob);const url=URL.createObjectURL(await r.blob());player.dataset.blob=url;player.src=url;player.hidden=false;await player.play();}catch(error){toast(error.message);}finally{button.disabled=false;}};
 setInterval(tick,1000);setInterval(refresh,5000);tick();if(state.token){api('/status').then(async()=>{$('loginOverlay').classList.add('hidden');await refresh();await loadStickers();}).catch(()=>{});}
 
 $('clearSummary').onclick=async()=>{try{await api('/continuity',{session:state.session?.key,action:'clear_summary'});await loadMemories();toast('摘要与较早归档已清除，最近对话和显式记忆保留。');}catch(e){toast(e.message);}};
 $('resetMood').onclick=async()=>{try{await api('/continuity',{session:state.session?.key,action:'reset_mood'});await loadMemories();toast('角色状态已恢复平静。');}catch(e){toast(e.message);}};
 
 async function loadTasks(){
-  const {items,automatic,paused}=await api('/tasks');
+  const {items,automatic,paused,desktop_enabled,desktop_auto}=await api('/tasks');
+  state.desktopEnabled=desktop_enabled;
+  state.desktopAuto=desktop_auto;
+  $('toggleDesktop').textContent=desktop_enabled?'关闭电脑工具':'开启电脑工具';
+  $('desktopStatus').textContent=desktop_enabled?'已允许手动任务使用电脑工具。':'已关闭；也请确认本机桌面桥服务已启动。';
+  $('toggleDesktopAuto').textContent=desktop_auto?'关闭自主桌面操作':'开启自主桌面操作';
+  $('desktopAutoStatus').textContent=desktop_auto?(desktop_enabled?'自主桌面操作已开启，受主动时间和次数限制。':'自主桌面开关已开启，但电脑工具总开关关闭。'):'自主桌面操作已关闭。';
   state.autoExplore=automatic;
   $('toggleAuto').textContent=automatic?'关闭自主探索':'开启自主探索';
   $('autoStatus').textContent=automatic?(paused?'已开启，但全部主动任务目前暂停。':'已开启，等待合适时机。'):'已关闭；你仍可在下方手动交给她任务。';
@@ -92,5 +99,7 @@ async function loadTasks(){
 }
 $('taskForm').onsubmit=async e=>{e.preventDefault();try{await api('/tasks',{action:'start',session:state.session?.key,goal:$('taskGoal').value});await loadTasks();toast('已开始，Saber 会在权限范围内选择步骤。');}catch(e){toast(e.message);}};
 $('toggleAuto').onclick=async()=>{try{await api('/tasks',{action:'automatic',enabled:!state.autoExplore});await loadTasks();toast('自主探索设置已更新。');}catch(e){toast(e.message);}};
+$('toggleDesktop').onclick=async()=>{try{await api('/tasks',{action:'desktop',enabled:!state.desktopEnabled});await loadTasks();toast('电脑工具设置已更新。');}catch(e){toast(e.message);}};
+$('toggleDesktopAuto').onclick=async()=>{try{await api('/tasks',{action:'desktop_auto',enabled:!state.desktopAuto});await loadTasks();toast('自主桌面操作设置已更新。');}catch(e){toast(e.message);}};
 document.addEventListener('click',async e=>{const stop=e.target.closest('.task-stop'),note=e.target.closest('.task-note');try{if(stop){await api('/tasks',{action:'stop',id:stop.dataset.id});await loadTasks();}if(note){const r=await fetch('/panel/api/tasks/'+encodeURIComponent(note.dataset.id)+'/note',{headers:{Authorization:'Bearer '+state.token}});if(!r.ok)throw new Error('笔记下载失败');const u=URL.createObjectURL(await r.blob());const a=document.createElement('a');a.href=u;a.download=note.dataset.id+'.md';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);}}catch(e){toast(e.message);}});
 setInterval(()=>{if(state.token&&state.view==='tasks')loadTasks().catch(e=>toast(e.message));},3000);
