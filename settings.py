@@ -34,6 +34,7 @@ FIELDS = {
                   "quiet_start_hour", "quiet_end_hour", "sources", "fetch_timeout_seconds",
                   "max_page_bytes", "max_page_chars", "search_enabled", "search_domains", "interests"},
     "dashboard": {"enabled", "access_token", "activity_limit"},
+    "asr": {"enabled", "url", "max_bytes", "max_seconds", "timeout_seconds", "min_avg_logprob"},
     "stickers": {"enabled", "builtin_dir", "upload_dir", "max_bytes", "min_interval_seconds"},
     "voice": {"enabled", "voice", "rate_percent", "pitch_hz", "proactive_probability", "min_interval_seconds",
               "max_chars", "max_bytes", "timeout_seconds", "provider", "gpt_sovits_url", "references", "fallback_to_edge",
@@ -41,6 +42,8 @@ FIELDS = {
 }
 
 DEFAULTS = {
+    "asr": {"enabled":False,"url":"http://host.docker.internal:9881","max_bytes":8388608,
+            "max_seconds":60.0,"timeout_seconds":45.0,"min_avg_logprob":-1.0},
     "voice": {"enabled": False, "provider": "edge", "gpt_sovits_url": "http://host.docker.internal:9880",
               "references": {}, "fallback_to_edge": True, "lock_reference": False, "emotion_rates": {},
               "fragment_interval_seconds": 0.3, "voice": "zh-CN-XiaoxiaoNeural", "rate_percent": -8, "pitch_hz": -2,
@@ -320,6 +323,17 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     _integer(voice["max_chars"], "voice.max_chars", 40, 300)
     _integer(voice["max_bytes"], "voice.max_bytes", 1024, 5242880)
     _number(voice["timeout_seconds"], "voice.timeout_seconds", 1.0)
+    asr = config["asr"]
+    if type(asr["enabled"]) is not bool:
+        _fail("asr.enabled", "必须为 true 或 false")
+    _url(asr["url"], "asr.url", ("http",))
+    if urlsplit(asr["url"]).hostname not in ("127.0.0.1", "localhost", "host.docker.internal"):
+        _fail("asr.url", "必须为本机识别服务地址")
+    _integer(asr["max_bytes"], "asr.max_bytes", 1024, 8388608)
+    for key, lower, upper in (("max_seconds",1,120),("timeout_seconds",5,120),("min_avg_logprob",-2,0)):
+        _number(asr[key], "asr."+key, lower)
+        if asr[key] > upper:
+            _fail("asr."+key, f"不能超过 {upper}")
     return config
 
 

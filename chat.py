@@ -19,6 +19,7 @@ from storage import Store
 from reading import read_page, search_domestic
 from stickers import StickerLibrary
 from speech import Speech, SAMPLE, requested as voice_requested
+from recognition import Recognition, RecognitionError
 
 C = load_config()
 M, H, P, S = (C[k] for k in ("model", "chat", "proactive", "storage"))
@@ -125,6 +126,8 @@ async def answer(state, text, memories=(), proactive=False, spoken=False):
                + "普通模型回复本身不更改这些开关，不自动保存记忆，也不意味着已经访问了网页。")
     if V["enabled"] and state.get("group_id") is None:
         system += "\n应用可将短回复合成为中文女声并发送 QQ 语音，用户可说‘想听你的声音’或发送 /语音测试。"
+    if C.get("asr",DEFAULTS["asr"])["enabled"]:
+        system += "\n应用已接入收到的 QQ 语音转写，可以理解语音转成的文字；转写可能有误，不确定时自然确认，不声称能听到语音以外的环境。"
     if spoken:
         system += (f"\n这条回复准备合成为语音。请用自然口语说话，正文不超过 {min(V['max_chars'], 140)} 字，"
                    "少用排版和括号动作描述，不朗读网址或代码，不自称没有语音能力。不要为了声音刻意撒娇或机械报幕。")
@@ -319,6 +322,8 @@ class Job:
     kind: str = "chat"
     sticker_id: str = ""
     test: bool = False
+    voice_file: str = ""
+    voice_input_error: str = ""
 
 
 class Engine:
@@ -333,6 +338,7 @@ class Engine:
         self.proactive_pending = set()
         self.library = StickerLibrary(ROOT, ST)
         self.speech = Speech(V, store)
+        self.recognition = Recognition(C.get("asr",DEFAULTS["asr"]))
         self.current = {}
         self.online_bots = set()
         self.next_check_at = time.time()
@@ -545,13 +551,19 @@ class Engine:
 
     async def enqueue(self, bot, event):
         text = event.get_plaintext().strip()[:H["max_input_chars"]]
-        if not text:
+        records = [seg for seg in event.original_message if seg.type == "record"]
+        if not text and not records:
             return
         group_id = event.group_id if isinstance(event, GroupMessageEvent) else None
         scope = f"g:{group_id}" if group_id is not None else f"u:{event.user_id}"
         key = f"{bot.self_id}:{scope}"
         sender = getattr(event.sender, "card", None) or getattr(event.sender, "nickname", "") or "未命名"
         job = Job(str(bot.self_id), event.user_id, group_id, key, text, time.time(), " ".join(str(sender).split())[:60])
+        if records:
+            file_id = records[0].data.get("file")
+            job.voice_file = file_id if isinstance(file_id,str) else ""
+            if len(records) != 1 or not job.voice_file:
+                job.voice_input_error = "请一次发一条完整语音，我才能听清。"
         try:
             self.store.touch(key, bot.self_id, event.user_id, group_id, H["default_persona"])
         except Exception as exc:
@@ -678,13 +690,13 @@ class Engine:
         if state is None:
             return
         state = self.effective_state(state)
-        if job.group_id is None and (job.text == "/语音测试" or job.kind == "voice"):
+        if not (job.voice_file or job.voice_input_error) and job.group_id is None and (job.text == "/语音测试" or job.kind == "voice"):
             if not self.speech.choose(job, force=True):
                 await self.send(job, "语音功能或此会话的语音开关未开启，请在管理面板检查。")
                 return
             await self.send(job, SAMPLE, voice=True)
             return
-        if job.text == "/表情测试" and job.group_id is None:
+        if not (job.voice_file or job.voice_input_error) and job.text == "/表情测试" and job.group_id is None:
             await self.send(job, "给你一个抱抱。", "hug", force_sticker=True)
             return
         if job.kind == "sticker":
@@ -693,12 +705,32 @@ class Engine:
         if job.proactive:
             await self.process_proactive(job, state)
             return
-        if not job.text.startswith("/"):
+        if job.voice_file or job.voice_input_error or not job.text.startswith("/"):
             await asyncio.sleep(max(0, H["session_interval_seconds"] - (time.time() - state["last_processed"])))
             if time.time() - job.queued_at > H["queue_ttl_seconds"]:
                 await self.send(job, "这条消息等待时间过长，已取消处理，请重新发送。")
                 return
-        reply = self.command(job, state)
+        from_voice = bool(job.voice_file or job.voice_input_error)
+        if from_voice:
+            self.stage(job,"asr","正在听你发来的语音")
+            try:
+                if job.voice_input_error:
+                    raise RecognitionError(job.voice_input_error)
+                transcript, duration = await self.recognition.transcribe(get_bot(job.bot_id),job.voice_file)
+                # 转写文本只参与聊天，不作为 /重置、/记住 等管理指令执行。
+                job.text = (job.text + "\n" if job.text else "") + "[语音转写，可能有识别误差]\n" + transcript
+                job.text = job.text[:H["max_input_chars"]]
+                self.record(job.key,"asr","done","已听取语音",{"text":transcript,"duration_seconds":duration,"provider":"faster_whisper"})
+                logger.info(f"[asr] transcribed chars={len(transcript)}")
+            except Exception as exc:
+                logger.warning(f"[asr] failed type={type(exc).__name__}")
+                self.record(job.key,"asr","failed","这次未能听清语音",{"type":type(exc).__name__})
+                await self.send(job,str(exc) if isinstance(exc,RecognitionError) else "这次没能听到语音，可以再试一次或打字告诉我吗？请管理员检查 [asr] 日志。")
+                return
+            if time.time()-job.queued_at > H["queue_ttl_seconds"]:
+                await self.send(job,"这条语音处理等待太久了，请重新发一次。")
+                return
+        reply = None if from_voice else self.command(job, state)
         messages = None
         sticker_id = ""
         want_voice = False

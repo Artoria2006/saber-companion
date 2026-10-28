@@ -230,6 +230,14 @@ max_bytes = 1048576 # 默认单张最大 1 MiB；支持 PNG、JPEG、GIF、WebP
 min_interval_seconds = 300.0 # 默认同会话自动配表情至少相隔 5 分钟；手动测试按钮不受此冷却影响
 
 
+[asr]
+enabled = false # 默认关闭；本地识别服务就绪后设为 true，可听取 QQ 私聊语音及群里真正@后的语音
+url = "http://host.docker.internal:9881" # Docker 访问 Windows 本机识别；直接运行 Python 则用 http://127.0.0.1:9881
+max_bytes = 8388608 # 默认最多8 MiB转码后WAV，允许1024到8388608；超过时请用户重录短句
+max_seconds = 60.0 # 默认最多60秒，允许1到120秒；长语音请分段
+timeout_seconds = 45.0 # 默认下载和识别总等待45秒，允许5到120秒；失败时询问用户，不猜内容
+min_avg_logprob = -1.0 # 默认-1.0，允许-2到0；越接近0越严格，低于阈值时请用户确认；不是准确率百分比
+
 [voice]
 provider = "edge" # 默认通用在线女声；专属声线部署完成后可设为 gpt_sovits
 gpt_sovits_url = "http://host.docker.internal:9880" # Docker 访问本机推理；直接运行 Python 时使用 http://127.0.0.1:9880

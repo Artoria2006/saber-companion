@@ -240,6 +240,21 @@ Docker 启动后打开 **http://127.0.0.1:8099/panel/**，使用 config.toml 的
 
 日记会记录“正在合成中文语音”、合成成功/失败以及最终发送形式。合成失败可安全退回文字；QQ 发送请求失败时仍不自动重发，因为回执不确定时重发可能导致重复消息。若有语音发送错误，检查 `[voice]`、`[message]` 和 NapCat 音频转换日志；当前 Docker 镜像的音频转换能力需要真实语音测试确认。
 
-当前实现是发送语音消息，不包含来信语音识别、实时双向通话或主动拨打 QQ 电话。
+语音消息与来信识别分别启用；当前不包含实时双向通话或主动拨打 QQ 电话。
 
 专属声线的本地素材准备、D 盘目录与下载脚本见 [VOICE_SETUP.md](VOICE_SETUP.md)。本机已接入 GPT-SoVITS v2ProPlus：支持中文主参考与日语辅助音色、模型选择语气、失败回退和分层日记。默认示例仍使用 Edge，部署本地引擎的版本、路径、配置与启动命令见该文档。此方案是参考音频合成，并非已训练的角色专用模型。
+
+
+## 12. 听取 QQ 语音（本机 Whisper）
+
+可选的 `[asr]` 默认关闭。本机已使用 D 盘独立环境的 faster-whisper base（CPU/int8）验证，不需要新 API Key。普通话为主要识别语言，名字、方言、噪声和同音字仍可能听错，不能把模型分数当作准确率保证。模型由 `scripts/download_gsv_models.py --asr` 固定版本下载；独立环境和实际版本见 [VOICE_SETUP.md](VOICE_SETUP.md) 与 requirements-gsv-windows.lock。
+
+现有本机环境执行 `& '.\scripts\start_asr.ps1'`，等待 `http://127.0.0.1:9881/health` 返回 ok。将 config.toml 的 `[asr].enabled` 设为 true 后执行 `docker compose build bot init`，再执行 `docker compose up -d --no-deps bot`。仅重启机器人，不需要退出 NapCat。电脑重启后需重新运行识别启动脚本；停止识别使用 `& '.\scripts\stop_asr.ps1'`。
+
+逐项配置：`enabled=false` 为开关；`url=http://host.docker.internal:9881` 用于容器访问本机，直接运行 Python 则填 `http://127.0.0.1:9881`；`max_bytes=8388608` 限制转码后 WAV 最多8 MiB；`max_seconds=60.0` 限制每条60秒；`timeout_seconds=45.0` 限制下载和识别总等待；`min_avg_logprob=-1.0` 是最低片段识别分数，允许 -2 到0，越接近0越严格。示例文件逐项带有范围注释。修改后重启机器人与识别服务，使两端限制同步。
+
+私聊直接发送一条 QQ 语音，Saber 转成文字后正常回复；群聊仍只处理消息段中真正 @机器人的消息。收到语音本身不强制语音回答，想听她说话可在语音中明确提出。一次只处理一条语音，多个语音段、超长、空音频和低分数结果会询问用户或要求重发，不交给聊天模型猜内容。语音转写不会执行 `/重置`、`/记住` 等管理命令，管理操作请打字发送。
+
+NapCat `get_record` 转为 WAV 后通过既有 OneBot 连接返回 Base64，本机识别服务只接收音频字节，不接受任意路径或 URL；[NapCat 文件处理说明](https://napneko.github.io/develop/file)。当前固定版本已核对该返回行为。无需开放文件下载端口或共享 QQ 目录。音频仅在机器人和本机识别进程内存中处理，转写文字会进入会话历史与受口令保护的活动日记，并作为聊天正文发送到已配置的模型 API；NapCat 自己可能缓存媒体。服务日志只记录处理状态，不打印语音内容。
+
+排错：`[protocol]` 检查收到 record 和 OneBot 连接；`[asr]` 检查转码、大小、时长、识别服务；`[model]` 检查识别完成后的聊天调用。活动日记中“正在听你发来的语音”“已听取语音”展示实际转写。网络/转码失败、静音或低分数时会请用户重说；同音字等高分数错误仍需用户纠正。先用手机录一段3—10秒普通话验收，Whisper 实际效果不足再评估 PaddleSpeech，当前没有安装第二套识别环境。

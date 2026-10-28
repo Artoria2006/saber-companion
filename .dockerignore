@@ -8,6 +8,7 @@
 !stickers.py
 !dashboard.py
 !speech.py
+!recognition.py
 !web/
 !web/**
 !assets/
