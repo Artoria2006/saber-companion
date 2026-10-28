@@ -15,6 +15,8 @@
 
 Python 3.10+，NoneBot2 2.4.3，OneBot v11 适配器 2.4.6，NapCat v4.18.41；Docker 内使用 Python 3.11.15。模型接口使用 Chat Completions，供应商必须支持 `messages` 和 `max_tokens`。
 
+更新记录见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 1. 系统要求与安装
 
 推荐 Windows 11 x64 + Docker Desktop（Linux 容器），或 Ubuntu 22.04/24.04 x64 + Docker Engine 与 Compose v2。建议 2 核 CPU、4 GB 内存、10 GB 可用磁盘；这不是运行内存保证。需要网络访问 GitHub、Docker Hub、PyPI、QQ 服务及模型服务商。
