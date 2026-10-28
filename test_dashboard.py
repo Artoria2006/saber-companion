@@ -52,6 +52,20 @@ class PanelTests(unittest.TestCase):
     def get(self, path):
         return self.client.get("/panel/api" + path, headers=self.headers)
 
+    def test_task_routes_auth_scope_and_filename(self):
+        self.assertEqual(self.client.get('/panel/api/tasks').status_code,401)
+        self.store.set_preference('companion_qq',300)
+        for key in ('100:u:301','100:g:200'):
+            self.assertEqual(self.post('/tasks',{'action':'start','session':key,'goal':'读篇文章'}).status_code,400)
+        with patch.object(self.engine.harness,'start',return_value={'id':'a'*32,'status':'queued'}) as start:
+            self.assertEqual(self.post('/tasks',{'action':'start','session':'100:u:300','goal':'读篇文章'}).status_code,200)
+            start.assert_called_once_with('读篇文章','100:u:300')
+        self.assertEqual(self.get('/tasks/not-valid/note').status_code,400)
+        self.assertEqual(self.get('/tasks/'+'a'*32+'/note').status_code,404)
+        self.assertEqual(self.post('/tasks',{'action':'automatic','enabled':True}).status_code,200)
+        self.assertTrue(self.store.preference('harness:auto'))
+        self.assertEqual(self.post('/tasks',{'action':'automatic','enabled':'true'}).status_code,400)
+
     def post(self, path, payload):
         return self.client.post("/panel/api" + path, headers=self.headers, json=payload)
 

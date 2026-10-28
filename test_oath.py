@@ -3,6 +3,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock,patch
 from test_chat import chat
+from storage import Store
+from pathlib import Path
+import tempfile
 
 
 class OathTests(unittest.IsolatedAsyncioTestCase):
@@ -33,6 +36,23 @@ class OathTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply,'我愿意。')
         self.assertEqual(state['history'][1]['content'],'我只是程序，不能答应。')
         self.assertTrue(any('我只是程序，不能答应' in m['content'] for m in stored_messages))
+
+
+    async def test_manual_oath_only_sends_once_to_companion_even_when_proactive_paused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store=Store(Path(temp)/'test.db')
+            store.touch('100:u:300','100',300,None,'saber')
+            store.touch('100:u:301','100',301,None,'saber')
+            store.set_preference('companion_qq',300)
+            store.set_preference('paused',True)
+            engine=chat.Engine(store)
+            with patch.object(chat,'get_bot',return_value=object()):
+                with self.assertRaises(ValueError):engine.enqueue_manual('100:u:301','oath')
+                job=engine.enqueue_manual('100:u:300','oath')
+            with patch.object(chat,'answer',AsyncMock(return_value=('我愿意。',[{'role':'system','content':''},{'role':'user','content':'[管理端请求]回誓'}]))),patch.object(engine,'send',AsyncMock()) as send:
+                await engine.process(job)
+                send.assert_awaited_once_with(job,'我愿意。')
+            self.assertTrue(store.preference('paused'))
 
 
 if __name__=='__main__':unittest.main()

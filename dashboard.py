@@ -135,14 +135,59 @@ def install_dashboard(app, engine, config, quiet, tz):
             elif action == "voice_settings":
                 engine.speech.update(values)
                 engine.record("", "control", "done", "已更新中文语音设置")
-            elif action in ("test", "sticker_test", "voice_test"):
+            elif action in ("test", "sticker_test", "voice_test", "oath_test"):
                 checked(key)
-                engine.enqueue_manual(key, {"test":"proactive", "sticker_test":"sticker", "voice_test":"voice"}[action], str(values.get("sticker", "hug")))
+                engine.enqueue_manual(key, {"test":"proactive", "sticker_test":"sticker", "voice_test":"voice", "oath_test":"oath"}[action], str(values.get("sticker", "hug")))
             else:
                 raise ValueError("未知操作")
         except (ValueError, KeyError) as exc:
             raise HTTPException(400, str(exc) if isinstance(exc, ValueError) else "QQ 尚未连接") from None
         return {"ok": True}
+
+    @router.get('/tasks', dependencies=[Depends(authenticated)])
+    async def tasks():
+        return {'items':engine.harness.items(), 'automatic':engine.store.preference('harness:auto', False),
+                'paused':engine.store.preference('paused', False)}
+
+    @router.post('/tasks', dependencies=[Depends(authenticated)])
+    async def task_control(request: Request):
+        values = await body(request)
+        try:
+            if values.get('action') == 'stop':
+                return engine.harness.stop(str(values.get('id', '')))
+            if values.get('action') == 'automatic':
+                enabled = values.get('enabled')
+                if type(enabled) is not bool:
+                    raise ValueError('开关必须是布尔值')
+                engine.store.set_preference('harness:auto', enabled)
+                if not enabled:
+                    for task in engine.harness.items():
+                        if task.get('automatic') and task['status'] in ('queued','running'):
+                            engine.harness.stop(task['id'])
+                engine.record('', 'control', 'done', '已开启自主探索' if enabled else '已关闭自主探索')
+                return {'ok':True}
+            if values.get('action') != 'start':
+                raise ValueError('未知任务操作')
+            key = values.get('session')
+            if not isinstance(key, str):
+                raise ValueError('请选择绑定伴侣会话')
+            state = checked(key)
+            companion = engine.store.preference('companion_qq', config['chat'].get('companion_qq', 0))
+            if state['group_id'] is not None or state['user_id'] != companion:
+                raise ValueError('任务工作台仅对已绑定伴侣开放')
+            return engine.harness.start(values.get('goal'), key)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @router.get('/tasks/{task_id}/note', dependencies=[Depends(authenticated)])
+    async def task_note(task_id: str):
+        try:
+            path = engine.harness.artifact(task_id)
+        except ValueError:
+            raise HTTPException(400, '任务编号或路径无效') from None
+        if not path.is_file():
+            raise HTTPException(404, '该任务尚未保存笔记')
+        return FileResponse(path, media_type='text/plain', filename=path.name)
 
     @router.post("/voice/preview", dependencies=[Depends(authenticated)])
     async def voice_preview():

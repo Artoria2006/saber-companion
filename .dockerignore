@@ -10,6 +10,7 @@
 !speech.py
 !recognition.py
 !continuity.py
+!harness.py
 !web/
 !web/**
 !assets/
