@@ -30,6 +30,28 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
         for text in ("你好", "语音设置在哪", "不要发语音", "不想听你的声音", "别用语音回复我"):
             self.assertFalse(requested(text),text)
 
+    async def test_warmup_only_once_per_voice_service_process(self):
+        speech = self.engine.speech
+        config = {'enabled': True, 'provider': 'gpt_sovits', 'gpt_sovits_url': 'http://localhost:9880',
+                  'voice': 'warm', 'references': {'warm': {'audio_path': 'reference.wav'}}}
+        replies = iter([1, 1, 2])
+        class Client:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def get(self, url):
+                return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'ok': True, 'pid': next(replies)})
+        async def sleep(_):
+            if synth.call_count == 2:
+                raise asyncio.CancelledError()
+        with patch.object(speech, 'settings', return_value=config), \
+             patch.object(speech, 'reference_name', return_value='warm'), \
+             patch.object(speech, 'synthesize_gsv', new_callable=AsyncMock) as synth, \
+             patch('speech.httpx.AsyncClient', return_value=Client()), \
+             patch('speech.asyncio.sleep', side_effect=sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                await speech.warmup_loop()
+            self.assertEqual(synth.call_count, 2)
+
     def test_spoken_text_removes_only_stage_directions(self):
         self.assertEqual(spoken_text('（轻笑）我在呢。（今天周三）'), '我在呢。（今天周三）')
         self.assertEqual(spoken_text('**晚安**，先休息。'), '晚安，先休息。')

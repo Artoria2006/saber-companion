@@ -100,6 +100,78 @@ async def request_model(messages, max_tokens=None, model=None):
             await asyncio.sleep(1)
 
 
+async def request_model_speech_stream(messages, on_fragment, max_chars=80):
+    """流式获取电话回复，按自然停顿发送短句。"""
+    started = time.monotonic()
+    first_token_at = None
+    stream = await CLIENT.chat.completions.create(
+        model=M['model'], messages=messages, max_tokens=min(160, M['max_output_tokens']),
+        extra_body=M.get('extra_body') or None, stream=True)
+    raw = ''
+    pending = ''
+    json_mode = None
+    sent = 0
+    async def emit_ready(final=False):
+        nonlocal pending, sent
+        while pending:
+            # 优先保留完整语句；句子较长时再按逗号断开，减少语气被切碎。
+            positions = [m.end() for m in re.finditer(r'[。！？；.!?;]', pending[:34]) if m.end() >= 9]
+            if not positions and len(pending) >= 20:
+                positions = [m.end() for m in re.finditer(r'[，,]', pending[:34]) if m.end() >= 9]
+            if positions:
+                cut = positions[0]
+            elif len(pending) >= 34:
+                cut = 34
+            elif final:
+                cut = len(pending)
+            else:
+                break
+            part, pending = pending[:cut].strip(), pending[cut:]
+            if part:
+                if sent == 0:
+                    logger.info('[call] first_phrase_seconds={:.2f}', time.monotonic() - started)
+                await on_fragment(part, sent)
+                sent += 1
+    try:
+        async for chunk in stream:
+            value = chunk.choices[0].delta.content if chunk.choices else None
+            if not value:
+                continue
+            if first_token_at is None:
+                first_token_at = time.monotonic()
+                logger.info('[call] first_token_seconds={:.2f}', first_token_at - started)
+            raw = (raw + value)[:4096]
+            if json_mode is None:
+                if not raw.strip():
+                    continue
+                head = raw.lstrip()
+                if head.startswith('`') and len(head) < 3:
+                    continue
+                json_mode = head.startswith(('{', '```'))
+                if not json_mode:
+                    pending = raw[:max_chars]
+            elif not json_mode:
+                remaining = max_chars - (len(raw) - len(value))
+                if remaining > 0:
+                    pending += value[:remaining]
+            if not json_mode:
+                await emit_ready()
+        if not raw.strip():
+            raise ValueError('模型返回空文本')
+        if json_mode:
+            parsed, _, _ = message_payload(raw)
+            if parsed.lstrip().startswith(('{', '```')):
+                raise ValueError('电话回复格式异常')
+            raw = parsed[:max_chars]
+            pending = raw
+        else:
+            raw = raw.strip()[:max_chars]
+        await emit_ready(final=True)
+        return raw
+    finally:
+        await stream.close()
+
+
 def relationship_context(state):
     # 恋人设定只用于明确绑定账号的私聊，避免套用到群成员或其他私聊联系人。
     if state.get("group_id") is not None:
@@ -142,7 +214,7 @@ def oath_model_messages(messages):
     return [*result,messages[-1]]
 
 
-async def answer(state, text, memories=(), proactive=False, spoken=False):
+async def answer(state, text, memories=(), proactive=False, spoken=False, on_fragment=None):
     oath_guidance=oath_context(state,text) if not proactive else ''
     persona = state["persona"] if state["persona"] in C["personas"] else H["default_persona"]
     system = H["system_prompt"] + "\n" + C["personas"][persona] + "\n" + relationship_context(state)
@@ -159,13 +231,15 @@ async def answer(state, text, memories=(), proactive=False, spoken=False):
         system += "\n应用可将短回复合成为中文女声并发送 QQ 语音，用户可说‘想听你的声音’或发送 /语音测试。"
     if C.get("asr",DEFAULTS["asr"])["enabled"]:
         system += "\n应用已接入收到的 QQ 语音转写，可以理解语音转成的文字；转写可能有误，不确定时自然确认，不声称能听到语音以外的环境。"
+    if spoken and state.get('telephone_call'):
+        system += "\n这是双向语音通话，请先接住对方的话，用自然的口语简短接话，通常一两句话，尽量控制在 45 字以内。适当停顿，不要每次都先问问题或重复安慰。"
     if spoken:
         system += (f"\n这条回复准备合成为语音。请用自然口语说话，正文不超过 {min(V['max_chars'], 140)} 字，"
                    "少用排版和括号动作描述，不朗读网址或代码，不自称没有语音能力。不要为了声音刻意撒娇或机械报幕。")
         system += ("\n像当面接话，先回应用户此刻的情绪，再说具体想说的话。通常用一到三句短句，长短自然变化。"
                    "使用正常逗号、句号和问号帮助停顿；不要堆省略号、感叹号或语气词，也不要输出情绪舞台指示。"
                    "温柔体现为认真听懂和具体回应，不每次套用‘辛苦了、休息吧、我会陪着你’，不把回复写成安慰广播。")
-        if V.get("provider")=="gpt_sovits":
+        if V.get("provider")=="gpt_sovits" and on_fragment is None:
             system += ("\n根据对话选择合适的语气参考，emotion 只能从这些名称中选择："+json.dumps(list(V["references"]))
                        + "。输出 JSON：{\"text\":\"自然的回复\",\"emotion\":\"参考名称\",\"sticker\":\"\",\"use_source\":false}。"
                        "安慰、想念可温柔，解释事情保持认真，晚安轻柔克制；语气标签不属于要朗读的正文。")
@@ -185,7 +259,7 @@ async def answer(state, text, memories=(), proactive=False, spoken=False):
     if 'mood' in state:
         system += mood_prompt(state['mood'])
     available = ENGINE.library.options() if ST["enabled"] and state.get("stickers_available", True) else []
-    if available:
+    if available and on_fragment is None:
         system += ("\n可用本地表情图片：" + json.dumps(available, ensure_ascii=False)
                    + "。合适时可以选一张表达情绪，不必每次使用；也不要连续发送同一张。"
                    "只能使用给出的 ID，不能提供 URL、路径或自行编造 ID。"
@@ -207,17 +281,27 @@ async def answer(state, text, memories=(), proactive=False, spoken=False):
                    "不要使用‘这个时间，若你正空闲’‘公开页面有更新的消息’之类开场，不总以今天过得如何结尾。"
                    "不因自己是 Saber 就默认推送 Fate/FGO；用户未主动提起时不要延续旧的相关推送。"
                    "只概括，不长篇照抄。角色身份影响性格，不限制兴趣主题。")
-    if spoken and V.get("provider")=="gpt_sovits":
+    if spoken and V.get("provider")=="gpt_sovits" and on_fragment is None:
         system += "\n最终 JSON 同时包含 text、emotion、sticker、use_source。emotion 使用上述可用参考名称，不输出解释或额外文字。"
     system += oath_guidance
+    if on_fragment is not None:
+        system += "\n当前是实时电话，请只输出要说的话，不要 JSON、表情标记、动作描述、网址或代码。"
     budget = M["context_tokens"] - M["max_output_tokens"]
+    emitted = False
+    async def tracked_fragment(part, number):
+        nonlocal emitted
+        emitted = True
+        await on_fragment(part, number)
     for attempt in range(3):
         messages = fit(system, state["history"], text, budget)
         model_messages=oath_model_messages(messages) if oath_guidance else messages
         logger.info(f"[model] request model={M['model']} estimated_tokens={tokens(model_messages)} attempt={attempt + 1} proactive={proactive}")
         try:
-            response = await request_model(model_messages)
-            content = response.choices[0].message.content if response.choices else None
+            if on_fragment is not None:
+                content = await request_model_speech_stream(model_messages, tracked_fragment, max_chars=min(80, H["max_reply_chars"], V["max_chars"]))
+            else:
+                response = await request_model(model_messages, max_tokens=160) if state.get("telephone_call") else await request_model(model_messages)
+                content = response.choices[0].message.content if response.choices else None
             if not content or not content.strip():
                 raise ValueError("模型返回空文本")
             logger.info("[model] success")
@@ -225,7 +309,7 @@ async def answer(state, text, memories=(), proactive=False, spoken=False):
         except BadRequestError as exc:
             body = str(exc.body).lower()
             overflow = any(x in body for x in ("context_length_exceeded", "maximum context", "context window", "too many tokens", "token limit", "上下文长度"))
-            if not overflow or attempt == 2:
+            if not overflow or attempt == 2 or emitted:
                 raise
             # 不把输入预算减到长人格自身所需的 token 以下。
             floor = tokens([{"role": "system", "content": system}]) + 128
@@ -585,6 +669,8 @@ class Engine:
         self.tasks = [asyncio.create_task(self.worker()) for _ in range(H["workers"])]
         self.tasks.append(asyncio.create_task(self.continuity.loop(request_model,tokens,self.record)))
         self.tasks.append(asyncio.create_task(self.proactive_loop()))
+        if V.get('enabled') and V.get('provider') == 'gpt_sovits':
+            self.tasks.append(asyncio.create_task(self.speech.warmup_loop()))
         logger.info(f"[storage] ready workers={H['workers']} queue_size={H['queue_size']}")
         self.record("", "service", "done", "Saber 服务已启动，活动记录从本次升级开始保存")
 

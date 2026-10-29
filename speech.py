@@ -8,6 +8,7 @@ import wave
 from array import array
 import edge_tts
 import httpx
+from nonebot import logger
 
 VOICES = {"zh-CN-XiaoxiaoNeural": "晓晓 · 中文女声", "zh-CN-XiaoyiNeural": "晓伊 · 中文女声"}
 EMOTIONS = {"neutral":"平静", "warm":"温柔", "cheerful":"开心", "serious":"认真", "sleepy":"晚安"}
@@ -37,6 +38,32 @@ class Speech:
         self.config, self.store = dict(config), store
         self.semaphore = asyncio.Semaphore(2)
         self.preview_at = 0
+
+    async def warmup_loop(self):
+        """本地语音服务启动后预热一次，避免首通电话承担冷启动耗时。"""
+        warmed = None
+        while True:
+            try:
+                config = self.settings()
+                if config.get('enabled') and config.get('provider') == 'gpt_sovits':
+                    async with httpx.AsyncClient(timeout=3, trust_env=False) as client:
+                        response = await client.get(config['gpt_sovits_url'].rstrip('/') + '/health')
+                        response.raise_for_status()
+                        health = response.json()
+                    pid = health.get('pid') if isinstance(health, dict) and health.get('ok') else None
+                    if type(pid) is int and pid > 0:
+                        name = self.reference_name('你好。', auto_emotion=True)
+                        identity = (pid, name, repr(config['references'].get(name)))
+                        if identity != warmed:
+                            started = time.monotonic()
+                            await self.synthesize_gsv('你好。', auto_emotion=True)
+                            warmed = identity
+                            logger.info('[voice] 本地声线预热完成，耗时 {:.2f} 秒', time.monotonic() - started)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning('[voice] 本地声线预热暂未完成：{}', type(exc).__name__)
+            await asyncio.sleep(30)
 
     def settings(self):
         value = self.config | self.store.preference("voice_settings", {})

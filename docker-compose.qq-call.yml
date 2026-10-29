@@ -1,0 +1,11 @@
+# 可选 QQ 电话实验：与 docker-compose.yml 一起使用，通话口令仅保存在 data/qq-call。
+services:
+  bot:
+    environment:
+      SABER_QQ_CALL_TOKEN_FILE: /run/saber-call/access-token
+    volumes:
+      - ./data/qq-call:/run/saber-call:ro
+  napcat:
+    image: saber-qq-call:lab
+    volumes:
+      - ./data/qq-call:/run/saber-call:ro

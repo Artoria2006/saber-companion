@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from recognition import validate_wav, RecognitionError
 
 
-def create_app(model, config):
+def create_app(model, config, model_name='base'):
     from fastapi import FastAPI, Request
     from fastapi.responses import JSONResponse
     from starlette.concurrency import run_in_threadpool
@@ -23,7 +23,7 @@ def create_app(model, config):
 
     @app.get('/health')
     async def health():
-        return {"ok":True,"provider":"faster_whisper","model":"base","device":"cpu"}
+        return {"ok":True,"provider":"faster_whisper","model":model_name,"device":"cpu"}
 
     def recognize(data):
         duration = validate_wav(data, config["max_bytes"], config["max_seconds"])
@@ -68,17 +68,18 @@ def main():
     parser.add_argument('--root',type=Path,default=Path('D:/saber-voice'))
     parser.add_argument('--config',type=Path,default=Path(__file__).resolve().parents[1]/'config.toml')
     parser.add_argument('--port',type=int,default=9881)
+    parser.add_argument('--model-name', choices=('base', 'small'), default='base')
     args = parser.parse_args()
     with args.config.open('rb') as f:
         config = tomllib.load(f)['asr']
-    model_dir = args.root.resolve()/'cache/asr-base'
+    model_dir = args.root.resolve()/'cache'/('asr-'+args.model_name)
     if not (model_dir/'model.bin').is_file():
-        parser.error('找不到本机 Whisper base 模型：'+str(model_dir))
+        parser.error('找不到本机 Whisper 模型：'+str(model_dir))
     logging.basicConfig(level=logging.INFO,format='%(asctime)s %(message)s')
     from faster_whisper import WhisperModel
     model = WhisperModel(str(model_dir),device='cpu',compute_type='int8',cpu_threads=6,local_files_only=True)
     import uvicorn
-    uvicorn.run(create_app(model, config),host='127.0.0.1',port=args.port,workers=1)
+    uvicorn.run(create_app(model, config, args.model_name),host='127.0.0.1',port=args.port,workers=1)
 
 
 if __name__ == '__main__':

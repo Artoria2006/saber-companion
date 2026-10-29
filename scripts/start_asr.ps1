@@ -2,6 +2,11 @@ param([string]$WorkRoot='D:\saber-voice')
 $ErrorActionPreference='Stop'
 $asrPython=Join-Path $WorkRoot '.venv\Scripts\python.exe'
 $entry=Join-Path $PSScriptRoot 'run_asr_api.py'
+$selection=Join-Path $WorkRoot 'asr-model.txt'
+$modelName='base'
+if (Test-Path -LiteralPath $selection) { $modelName=(Get-Content -LiteralPath $selection -Raw).Trim() }
+if ($modelName -notin @('base','small')) { throw 'asr-model.txt 只接受 base 或 small。' }
+if (-not (Test-Path -LiteralPath (Join-Path $WorkRoot "cache\asr-$modelName\model.bin"))) { throw "找不到识别模型 $modelName，请检查 D 盘模型文件。" }
 if (-not (Test-Path -LiteralPath $asrPython)) { throw "独立环境不存在：$asrPython" }
 if (Get-NetTCPConnection -LocalPort 9881 -State Listen -ErrorAction SilentlyContinue) { throw '9881 端口已被占用，不会自动结束其他进程。' }
 $logs=Join-Path $WorkRoot 'logs'
@@ -9,8 +14,8 @@ New-Item -ItemType Directory -Path $logs -Force | Out-Null
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $outLog=Join-Path $logs "asr-$stamp.out.log"
 $errLog=Join-Path $logs "asr-$stamp.err.log"
-$arguments=@(('"'+$entry+'"'),'--root',('"'+$WorkRoot+'"'))
+$arguments=@(('"'+$entry+'"'),'--root',('"'+$WorkRoot+'"'),'--model-name',$modelName)
 $child=Start-Process -FilePath $asrPython -ArgumentList $arguments -WorkingDirectory $WorkRoot -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru
 @{pid=$child.Id;stdout=$outLog;stderr=$errLog} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $WorkRoot 'asr-process.json') -Encoding utf8
-Write-Output "识别服务启动中，PID=$($child.Id)，健康地址 http://127.0.0.1:9881/health"
+Write-Output "识别服务启动中，模型=$modelName，PID=$($child.Id)，健康地址 http://127.0.0.1:9881/health"
 Write-Output "日志：$outLog 和 $errLog"

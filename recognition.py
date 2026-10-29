@@ -54,22 +54,34 @@ class Recognition:
                     data = base64.b64decode(encoded, validate=True)
                 except (ValueError, binascii.Error) as exc:
                     raise RecognitionError("下载的语音内容不完整，请重新发送。") from exc
-                validate_wav(data, c["max_bytes"], c["max_seconds"])
-                async with httpx.AsyncClient(timeout=c["timeout_seconds"], trust_env=False) as client:
-                    async with client.stream("POST", c["url"].rstrip('/') + "/transcribe", content=data,
-                                             headers={"Content-Type":"audio/wav"}) as response:
-                        if response.status_code == 422:
-                            raise RecognitionError("这句我没听清，可以换个说法再说一次，或打字告诉我吗？")
-                        response.raise_for_status()
-                        raw = bytearray()
-                        async for chunk in response.aiter_bytes():
-                            raw.extend(chunk)
-                            if len(raw) > 32768:
-                                raise RecognitionError("识别结果异常，请管理员检查 [asr] 日志。")
-                import json
-                value = json.loads(raw)
-                text = value.get("text")
-                if value.get("uncertain") or not isinstance(text, str) or not text.strip() or len(text) > 3000:
-                    raise RecognitionError("这句我没听清，可以再说一次，或打字告诉我吗？")
-                return text.strip(), value.get("duration_seconds")
+                return await self._transcribe_wav(data)
         return await asyncio.wait_for(work(), timeout=c["timeout_seconds"])
+
+    async def transcribe_wav(self, data):
+        if not self.config["enabled"]:
+            raise RecognitionError("我暂时还没开启语音识别。")
+        async def work():
+            async with self.semaphore:
+                return await self._transcribe_wav(data)
+        return await asyncio.wait_for(work(), timeout=self.config["timeout_seconds"])
+
+    async def _transcribe_wav(self, data):
+        c = self.config
+        validate_wav(data, c["max_bytes"], c["max_seconds"])
+        async with httpx.AsyncClient(timeout=c["timeout_seconds"], trust_env=False) as client:
+            async with client.stream("POST", c["url"].rstrip('/') + "/transcribe", content=data,
+                                     headers={"Content-Type":"audio/wav"}) as response:
+                if response.status_code == 422:
+                    raise RecognitionError("这句我没听清，可以换个说法再说一次，或打字告诉我吗？")
+                response.raise_for_status()
+                raw = bytearray()
+                async for chunk in response.aiter_bytes():
+                    raw.extend(chunk)
+                    if len(raw) > 32768:
+                        raise RecognitionError("识别结果异常，请管理员检查 [asr] 日志。")
+        import json
+        value = json.loads(raw)
+        text = value.get("text")
+        if value.get("uncertain") or not isinstance(text, str) or not text.strip() or len(text) > 3000:
+            raise RecognitionError("这句我没听清，可以再说一次，或打字告诉我吗？")
+        return text.strip(), value.get("duration_seconds")

@@ -49,4 +49,6 @@ if __name__ == "__main__":
         from chat import ENGINE, C, quiet, CHINA
         from dashboard import install_dashboard
         install_dashboard(nonebot.get_app(), ENGINE, C, quiet, CHINA)
+        from voice_call import install_call
+        install_call(nonebot.get_app(), ENGINE, C)
         nonebot.run()
