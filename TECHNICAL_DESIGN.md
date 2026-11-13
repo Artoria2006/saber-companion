@@ -26,4 +26,4 @@ flowchart LR
 
 ## 配置、安全与测试
 
-配置用 `config.example.toml` 展示，实际 `config.toml` 不进入 Git。访问令牌、个人数据和音频不写入源码。外部网页工具受域名及内网限制；公开地址仍可能变化。测试入口为 `python -m unittest discover -v` 和电话桥 Node 测试；CI 覆盖 Python 3.10、3.11、3.12。它们不替代真实 QQ、模型 API 和音频设备验收。
+配置用 `config.example.toml` 展示，实际 `config.toml` 不进入 Git。访问令牌、个人数据和音频不写入源码。外部网页工具受域名及内网限制；公开地址仍可能变化。公开仓库的 CI 检查 Python 3.10、3.11、3.12 的依赖与静态语法，以及电话桥 JavaScript 语法；自动化测试代码保留在开发者本机，不包含在公开仓库中。这些检查不等同于功能测试，也不能替代真实 QQ、模型 API 和音频设备验收。

@@ -6,3 +6,4 @@ scripts/*
 third_party/*
 !third_party/qq-call/
 !third_party/qq-call/**
+third_party/qq-call/bridge/tests/

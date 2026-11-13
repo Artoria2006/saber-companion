@@ -1,4 +1,4 @@
-name: Python tests
+name: Code checks
 
 on:
   push:
@@ -26,17 +26,14 @@ jobs:
           cache: pip
       - name: 安装固定的直接依赖
         run: python -m pip install -r requirements.txt
-      - name: 安装 QQ 电话测试依赖
-        run: python -m pip install -r requirements-qq-call.txt
       - name: 安装并运行静态检查
         run: |
           python -m pip install ruff==0.15.22
           ruff check --select F .
       - name: 检查依赖一致性
         run: python -m pip check
-      - name: 运行离线模拟测试
-        # 测试使用示例配置和模拟模型，不需要真实 QQ 或模型密钥。
-        run: python -m unittest discover -v
+      - name: 检查 Python 语法
+        run: python -m compileall -q .
 
   qq-bridge:
     runs-on: ubuntu-latest
@@ -47,5 +44,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: 运行电话桥离线测试
-        run: node --test third_party/qq-call/bridge/tests/bridge.test.mjs
+      - name: 检查电话桥 JavaScript 语法
+        run: node --check third_party/qq-call/bridge/napcat-plugin/index.mjs

@@ -15,6 +15,9 @@ napcat_config/
 .pytest_cache/
 .coverage
 htmlcov/
+# 测试文件保留在本机，不提交到公开仓库。
+tests/
+third_party/qq-call/bridge/tests/
 # 声线素材与权重保留在本地，避免意外上传。
 *.ckpt
 *.pth
