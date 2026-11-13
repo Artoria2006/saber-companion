@@ -18,6 +18,8 @@ htmlcov/
 # 测试文件保留在本机，不提交到公开仓库。
 tests/
 third_party/qq-call/bridge/tests/
+# 旧版单独保存的人格草稿不作为运行配置。
+saber.prompt.txt
 # 声线素材与权重保留在本地，避免意外上传。
 *.ckpt
 *.pth

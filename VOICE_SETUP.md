@@ -48,7 +48,7 @@ New-Item -ItemType Directory -Force D:\saber-voice\references | Out-Null
 - 官方源码：https://github.com/RVC-Boss/GPT-SoVITS ，固定提交 `b4570b876f5c086819ba84e3215472733c6a7b70`。
 - 独立根目录 `D:\saber-voice`：`.venv` 为运行环境，`GPT-SoVITS` 为源码和基础权重，`input` 为用户提供的音轨，`processed` 为人声分离及转写，`references` 为参考与准确转写，`samples` 为试听结果，`logs` 为服务日志。
 - 基础模型与校验信息见 `scripts/download_gsv_models.py`；Windows 环境版本记录见 `requirements-gsv-windows.lock`。该锁文件用于已验证环境记录，不替代匹配显卡驱动与 CUDA 版 PyTorch 的安装。
-- 音轨来自用户本地提供的两个视频文件；不上传音频、参考转写、权重、聊天记录或登录数据。第三方源码、模型和素材遵循各自许可。
+- 用户自行准备有权使用的音频；不上传音频、参考转写、权重、聊天记录或登录数据。第三方源码、模型和素材遵循各自许可。
 
 ## 本机启动与停止
 
@@ -103,7 +103,16 @@ max_bytes = 5242880 # 示例默认2097152；本机提高到5 MiB
 
 ## 素材处理与验收
 
-公开下载脚本为 `scripts/download_voice_sources.ps1`。平台拒绝下载时会退出，不读取浏览器 Cookie 或处理验证码。已有文件无需重复下载。提取与分离：
+可选的下载脚本 `scripts/download_voice_sources.ps1` 仅处理用户明确指定、且有权使用的 HTTPS 链接：`& '.\scripts\download_voice_sources.ps1' -Urls 'https://example.com/audio'`（将示例地址替换为实际允许下载的公开资源）。该脚本需要先在独立环境安装 `requirements-voice-tools.txt`；平台拒绝下载时退出，不读取浏览器 Cookie 或处理验证码。已有本地文件无需下载。提取与分离：
+
+安装可选素材处理工具：
+
+```powershell
+& D:\saber-voice\.venv\Scripts\python.exe -m pip install -r requirements-voice-tools.txt
+$env:PATH = 'D:\saber-voice\tools\ffmpeg\bin;' + $env:PATH
+```
+
+第二行只修改当前 PowerShell 窗口的 PATH，使提取脚本可以找到 FFmpeg。然后执行：
 
 ```powershell
 & 'D:\saber-voice\.venv\Scripts\python.exe' '.\scripts\prepare_voice_audio.py' 'D:\saber-voice\input\sample.mp4' --duration 600 --separate
