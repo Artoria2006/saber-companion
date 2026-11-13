@@ -1,12 +1,9 @@
 """语音获取、识别边界和消息处理测试，不使用真实 QQ、模型或私人音频。"""
-import asyncio
 import base64
 import copy
 import io
-import json
 import sys
 import tempfile
-import time
 import unittest
 import wave
 from pathlib import Path

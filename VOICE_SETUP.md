@@ -1,5 +1,23 @@
 # 本地 GPT-SoVITS 声线
 
+> 复现状态：以下是开发机记录，不是已经在全新机器验证通过的一键安装。仓库提供启动脚本、版本记录及模型下载脚本，但不包含 Python 环境、模型权重、FFmpeg、参考音频或用户数据。其他使用者必须准备有权使用的参考素材，完成依赖和模型安装后自行测试；基础文字聊天无需安装这些组件。
+
+## 从空目录准备的参考步骤（待独立设备验收）
+
+使用 Windows x64、支持 CUDA 12.1 的 NVIDIA 显卡与驱动、Git 和 Python 3.11；以 PowerShell 在项目目录执行以下命令。安装体积很大，需要充足 D 盘空间和网络。
+
+```powershell
+New-Item -ItemType Directory -Force D:\saber-voice | Out-Null
+git clone https://github.com/RVC-Boss/GPT-SoVITS.git D:\saber-voice\GPT-SoVITS
+git -C D:\saber-voice\GPT-SoVITS checkout b4570b876f5c086819ba84e3215472733c6a7b70
+py -3.11 -m venv D:\saber-voice\.venv
+$env:PYTHONUTF8 = '1'
+& D:\saber-voice\.venv\Scripts\python.exe -m pip install --extra-index-url https://download.pytorch.org/whl/cu121 -r requirements-gsv-windows.lock
+& D:\saber-voice\.venv\Scripts\python.exe scripts\download_gsv_models.py --asr --g2pw
+```
+
+最后一条按默认 D 盘目录下载基础模型、base 识别模型和中文多音字模型；下载可能需要很长时间。独立环境还需 FFmpeg 和可用的参考音频，具体文件检查见下文。上述锁文件是本机环境记录，包含 Windows/CUDA 特定版本；其全新安装尚未验收，安装失败时不能据此断言声线可用。不要把参考音频、模型权重或登录信息提交到仓库。
+
 本机已部署 GPT-SoVITS v2ProPlus，使用参考音频直接合成，无需为每个句子重新训练。它不是已经训练完成的 Saber 专用模型。日语参考可能把日语发音习惯带进中文；当前方案采用普通话主参考约束发音、日语辅助参考保留部分音色。音色相似度、情绪和普通话自然度仍需试听判断，自动转写正确不能替代听感验收。
 
 ## 已验证的环境与文件

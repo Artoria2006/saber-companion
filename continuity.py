@@ -2,7 +2,6 @@
 import asyncio
 import json
 import re
-import time
 
 
 def mood_event(text, config):

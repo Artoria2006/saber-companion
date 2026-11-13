@@ -113,7 +113,7 @@ class AutonomousTests(unittest.IsolatedAsyncioTestCase):
                 event.set()
                 await asyncio.Event().wait()
             engine.harness=Harness(store,{'sources':[],'search_enabled':False},temp,{'context_tokens':8192},wait,engine.record)
-            task=engine.harness.start('自主探索','100:u:300',automatic=True)
+            engine.harness.start('自主探索','100:u:300',automatic=True)
             await event.wait()
             engine.pause(True)
             await engine.harness.active

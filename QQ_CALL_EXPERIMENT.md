@@ -1,8 +1,18 @@
 # QQ 电话实验记录
 
+> 仓库现已包含电话桥所需的上游桥源码和本地修改，来源及许可见 [NOTICE](third_party/qq-call/NOTICE.md)。此功能是非官方实验，构建镜像不代表真实 QQ 通话已通过；不会自动发送电话或替用户登录。
+
+从项目根目录构建独立实验镜像（需要 Docker、网络和较多下载时间）：
+
+```powershell
+docker build -f Dockerfile.qq-call -t saber-qq-call:lab .
+```
+
+基础文字聊天不需要构建该镜像。使用实验配置前需要自己的 QQ 登录、先在面板绑定私聊、启动本地识别与合成服务，再准备授权文件；仅在本人明确希望接听时启用。不同系统、NapCat 或 QQ 版本的真实通话仍需单独验收。以下旧记录保留了当时的测试状态，不代表当前启用状态。
+
 当前为本机实验功能，已完成一次真实 QQ 电话接通和语音回复测试，速度及打断效果仍需持续验证。它依赖 Linux NapCat 的内部 AVSDK 接口，升级 QQ 或 NapCat 后需要重新验证。使用者必须自行登录自己的 QQ；建议只做私聊测试。来电号码未经解析或未匹配本机绑定伴侣账号、音频工作进程未就绪时，桥拒绝自动接听。不要把授权文件、口令、QQ 登录数据提交到版本库。
 
-实验容器使用 `saber-qq-call:lab`，它从项目外部的 GPL-3.0-only 开源项目 [maibot-qq-voice-call](https://github.com/ClaudiaGardner/maibot-qq-voice-call) 单独构建；本地修改增加了来电号码和工作进程就绪校验。NapCat 4.18.41 默认只加载官方白名单插件；实验镜像对其加载器增加一项精确例外，仅接受路径与 SHA-256 都匹配的电话桥，其他插件的白名单检查保持原样。这是本地兼容补丁，不是 NapCat 官方支持。构建目录为 `D:\saber-voice\qq-call-research`，具体上游版本用 `git -C D:\saber-voice\qq-call-research rev-parse HEAD` 查看；该目录保留第三方协议及修改。不要把 GPL-only 第三方代码直接合并进 AGPL 主项目而不检查协议兼容性。
+实验容器使用 `saber-qq-call:lab`，桥来源于 GPL-3.0-only 开源项目 [maibot-qq-voice-call](https://github.com/ClaudiaGardner/maibot-qq-voice-call)，固定提交及本地修改见 NOTICE。NapCat 4.18.41 默认只加载官方白名单插件；实验镜像对其加载器增加一项精确例外，仅接受路径与 SHA-256 都匹配的电话桥，其他插件的白名单检查保持原样。这是本地兼容补丁，不是 NapCat 官方支持。
 
 完成本机镜像构建并生成授权文件后，用以下命令启动实验配置：
 

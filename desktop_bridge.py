@@ -1,5 +1,4 @@
 """电脑工具边界：只打开被用户目标明确点名的网页或指定 Windows 软件。"""
-import json
 import os
 import re
 from pathlib import Path

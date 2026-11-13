@@ -1,11 +1,10 @@
 """桌面桥只能执行显式授权的有限操作；测试不打开真实窗口。"""
-import asyncio
 import tempfile
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import Mock, patch
 import httpx
 from desktop_bridge import DesktopBridge
 from scripts import desktop_service as service

@@ -1,0 +1,8 @@
+*
+!scripts/
+scripts/*
+!scripts/qq_call_worker.py
+!third_party/
+third_party/*
+!third_party/qq-call/
+!third_party/qq-call/**

@@ -32,6 +32,8 @@ Python 3.10+，NoneBot2 2.4.3，OneBot v11 适配器 2.4.6，NapCat v4.18.41；D
 
 更新记录见 [CHANGELOG.md](CHANGELOG.md)。
 
+交付文档：[产品设计](PRODUCT_DESIGN.md)、[技术方案](TECHNICAL_DESIGN.md)、[开发过程与验收](DEVELOPMENT_PROCESS.md)、[参与开发](CONTRIBUTING.md)、[安全问题](SECURITY.md)。基础聊天、可选本地声线与实验 QQ 电话的安装条件不同；克隆仓库不会自动获得用户参考音频或可用账号。
+
 ## 1. 系统要求与安装
 
 推荐 Windows 11 x64 + Docker Desktop（Linux 容器），或 Ubuntu 22.04/24.04 x64 + Docker Engine 与 Compose v2。建议 2 核 CPU、4 GB 内存、10 GB 可用磁盘；这不是运行内存保证。需要网络访问 GitHub、Docker Hub、PyPI、QQ 服务及模型服务商。

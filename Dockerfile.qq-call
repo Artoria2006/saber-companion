@@ -1,0 +1,12 @@
+FROM python:3.10-slim AS wheels
+RUN python -m pip download --only-binary=:all: --no-deps -d /wheels websockets==12.0 webrtcvad-wheels==2.0.14
+
+FROM mlikiowa/napcat-docker:v4.18.41
+RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get -y --no-install-recommends --fix-broken install && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pulseaudio pulseaudio-utils python3-httpx libpulse-mainloop-glib0 libegl1 libopengl0 unzip && rm -rf /var/lib/apt/lists/*
+COPY third_party/qq-call/bridge /opt/saber/bridge
+COPY scripts/qq_call_worker.py /opt/saber/qq_call_worker.py
+COPY --from=wheels /wheels/ /tmp/wheels/
+RUN mkdir -p /opt/saber/site-packages && unzip -qo /tmp/wheels/websockets-12.0*.whl -d /opt/saber/site-packages && unzip -qo /tmp/wheels/webrtcvad_wheels-2.0.14*.whl -d /opt/saber/site-packages && rm -rf /tmp/wheels
+COPY third_party/qq-call/patch-napcat.py /opt/saber/patch-napcat.py
+COPY third_party/qq-call/saber-call-setup.sh /opt/saber/setup.sh
+RUN sed -i '/^cd \/app\/napcat$/i source /opt/saber/setup.sh' /app/entrypoint.sh

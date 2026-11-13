@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from speech import SAMPLE, VOICES
+from speech import SAMPLE
 
 ROOT = Path(__file__).resolve().parent
 
