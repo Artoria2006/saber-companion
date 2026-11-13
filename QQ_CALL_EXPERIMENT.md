@@ -10,16 +10,43 @@ docker build -f Dockerfile.qq-call -t saber-qq-call:lab .
 
 基础文字聊天不需要构建该镜像。使用实验配置前需要自己的 QQ 登录、先在面板绑定私聊、启动本地识别与合成服务，再准备授权文件；仅在本人明确希望接听时启用。不同系统、NapCat 或 QQ 版本的真实通话仍需单独验收。以下旧记录保留了当时的测试状态，不代表当前启用状态。
 
+## 新用户的 Windows Docker 操作顺序
+
+1. 先按 README 跑通文字私聊，确认手机使用的是另一个 QQ 账号；在管理面板选择该私聊并绑定为伴侣。电话只接受绑定的私聊号码。
+2. 按 [本地声线教程](VOICE_SETUP.md)准备 GPT-SoVITS、参考音频和 Whisper base；在 `config.toml` 设置 `[voice]` 的 `enabled = true`、`provider = "gpt_sovits"` 和正确参考，在 `[asr]` 设置 `enabled = true`。按该教程启动两个本机服务，分别访问 `http://127.0.0.1:9880/health` 和 `http://127.0.0.1:9881/health`，确认均返回 `ok: true`。
+3. 在项目目录执行下面的 PowerShell 命令。这会重建机器人镜像并重启 bot，保留 NapCat；电话授权文件由容器内程序生成，不需要在宿主机另装 Python。
+
+```powershell
+docker compose build bot
+docker compose up -d --no-deps bot
+docker compose exec -T bot python scripts/prepare_qq_call.py
+docker build -f Dockerfile.qq-call -t saber-qq-call:lab .
+```
+
+如果提示没有绑定私聊，先向机器人私聊一条消息，再在面板绑定正确的会话并重新执行准备命令。如果提示已有授权号码不一致，不要覆盖文件；先核对并妥善处理 `data/qq-call` 内的本机授权数据。
+
+4. 准备命令不会自动开启接听。确认确实希望该账号的 QQ 私聊来电被自动接听后，在项目目录执行：
+
+```powershell
+docker compose exec -T bot python -c "from pathlib import Path; p=Path('/app/data/qq-call'); assert not (p/'disabled').exists(), '电话实验处于禁用状态，请先检查 disabled 标记'; assert (p/'allowed-uin').is_file() and (p/'access-token').is_file(), '先执行授权准备'; (p/'armed').touch(); print('已允许绑定账号的电话自动接听')"
+docker compose -f docker-compose.yml -f docker-compose.qq-call.yml up -d --no-deps bot napcat
+```
+
+切换 NapCat 镜像会重启协议端，可能需要重新扫码。先在 WebUI 确认 QQ 登录并检查 `docker compose logs --tail 100 bot napcat`；本机两个语音健康检查也要保持通过。然后由已绑定的账号主动发起私聊语音，确认接听和双方声音；插件、QQ 版本、模型与网络都可能使测试失败。日志不要公开账号、口令或对话。
+
+5. **停止自动接听**：在项目目录执行下列命令，再等待当前电话结束。该操作只删除启用标记，不删除授权文件或聊天数据：
+
+```powershell
+docker compose exec -T bot python -c "from pathlib import Path; Path('/app/data/qq-call/armed').unlink(missing_ok=True); print('已停止后续电话自动接听')"
+```
+
+如果存在 `data/qq-call/disabled`，说明本机曾明确暂停实验；先排查并由使用者自行决定是否移除该标记，脚本不会自动解除暂停。无需电话时可按下文恢复基础镜像。
+
 当前为本机实验功能，已完成一次真实 QQ 电话接通和语音回复测试，速度及打断效果仍需持续验证。它依赖 Linux NapCat 的内部 AVSDK 接口，升级 QQ 或 NapCat 后需要重新验证。使用者必须自行登录自己的 QQ；建议只做私聊测试。来电号码未经解析或未匹配本机绑定伴侣账号、音频工作进程未就绪时，桥拒绝自动接听。不要把授权文件、口令、QQ 登录数据提交到版本库。
 
 实验容器使用 `saber-qq-call:lab`，桥来源于 GPL-3.0-only 开源项目 [maibot-qq-voice-call](https://github.com/ClaudiaGardner/maibot-qq-voice-call)，固定提交及本地修改见 NOTICE。NapCat 4.18.41 默认只加载官方白名单插件；实验镜像对其加载器增加一项精确例外，仅接受路径与 SHA-256 都匹配的电话桥，其他插件的白名单检查保持原样。这是本地兼容补丁，不是 NapCat 官方支持。
 
-完成本机镜像构建并生成授权文件后，用以下命令启动实验配置：
-
-```powershell
-.\.venv\Scripts\python.exe scripts/prepare_qq_call.py
-docker compose -f docker-compose.yml -f docker-compose.qq-call.yml up -d
-```
+完成授权文件和启用标记后，使用上面的 Compose 双文件命令启动实验配置。
 
 需要取消实验配置时，运行 `docker compose -f docker-compose.yml up -d --no-deps bot napcat`，即可恢复原机器人镜像；QQ 数据卷和对话数据库仍保留。由实验安装器添加的 NapCat 插件启用条目可能仍保留在配置卷中，原镜像不包含该插件。`data/qq-call` 中存有专用口令和授权账号，属于私有数据。
 

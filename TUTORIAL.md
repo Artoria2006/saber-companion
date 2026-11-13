@@ -1,5 +1,7 @@
 # 从零到首次 QQ 对话
 
+先完成第 1—18 步验证文字聊天；需要本地参考声线时继续阅读 [本地声线教程](VOICE_SETUP.md)，需要 QQ 私聊电话时再阅读 [QQ 电话实验教程](QQ_CALL_EXPERIMENT.md)。这些扩展需要额外的本机依赖和验证，不随基础 Docker 启动自动安装。
+
 1. **准备设备**：Windows 11 x64 或 Ubuntu 22.04/24.04 x64，建议 2 核、4 GB 内存、10 GB 空闲磁盘；手机已安装 QQ。截图位置：系统版本与空闲磁盘，隐藏设备标识。
 2. **安装 Git 和 Docker**：使用 README 第 1 节官方链接完成安装。Windows 启用 WSL2，重启后打开 Docker Desktop，使用 Linux 容器。截图位置：Docker Engine running 状态。
 3. **验证环境**：终端执行 `git --version`、`docker version`、`docker compose version`，任何一个失败都先修复对应安装。截图位置：三个命令的成功输出。

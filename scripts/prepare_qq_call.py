@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def main():
     config = load_config()
-    store = Store(ROOT / 'data' / 'assistant.sqlite3')
+    store = Store(ROOT / config['storage']['path'])
     user = store.preference('companion_qq', config['chat'].get('companion_qq', 0))
     if not user or not any(s['group_id'] is None and s['user_id'] == user for s in store.sessions()):
         raise SystemExit('请先在面板中将你的 QQ 私聊设为伴侣账号。')

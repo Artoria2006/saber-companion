@@ -4,7 +4,7 @@
 
 ## 从空目录准备的参考步骤（待独立设备验收）
 
-使用 Windows x64、支持 CUDA 12.1 的 NVIDIA 显卡与驱动、Git 和 Python 3.11；以 PowerShell 在项目目录执行以下命令。安装体积很大，需要充足 D 盘空间和网络。
+使用 Windows 10/11 x64、支持 CUDA 12.1 的 NVIDIA 显卡与驱动、Git、Python 3.11 和 Docker Desktop；建议至少 8 GB 显存、30 GB D 盘空闲空间。安装 Python 时启用 `py` 启动器。以 PowerShell 在项目目录执行以下命令。安装需要下载数 GB 文件，确保网络可以访问 GitHub、PyPI、PyTorch 和 Hugging Face。
 
 ```powershell
 New-Item -ItemType Directory -Force D:\saber-voice | Out-Null
@@ -17,6 +17,28 @@ $env:PYTHONUTF8 = '1'
 ```
 
 最后一条按默认 D 盘目录下载基础模型、base 识别模型和中文多音字模型；下载可能需要很长时间。独立环境还需 FFmpeg 和可用的参考音频，具体文件检查见下文。上述锁文件是本机环境记录，包含 Windows/CUDA 特定版本；其全新安装尚未验收，安装失败时不能据此断言声线可用。不要把参考音频、模型权重或登录信息提交到仓库。
+
+### 安装 FFmpeg 并检查
+
+项目默认从 `D:\saber-voice\tools\ffmpeg\bin` 找 `ffmpeg.exe` 和 `ffprobe.exe`。可安装 [FFmpeg 的 Windows 构建](https://www.gyan.dev/ffmpeg/builds/)（GPT-SoVITS 上游 Windows 打包脚本也使用该来源），从压缩包的 `bin` 文件夹复制这两个程序到上述目录。已安装 FFmpeg 并能在当前终端运行时，也可以执行：
+
+```powershell
+New-Item -ItemType Directory -Force D:\saber-voice\tools\ffmpeg\bin | Out-Null
+Copy-Item (Get-Command ffmpeg.exe -ErrorAction Stop).Source D:\saber-voice\tools\ffmpeg\bin\ffmpeg.exe
+Copy-Item (Get-Command ffprobe.exe -ErrorAction Stop).Source D:\saber-voice\tools\ffmpeg\bin\ffprobe.exe
+& D:\saber-voice\.venv\Scripts\python.exe scripts\voice_doctor.py
+```
+
+检查只确认文件和包是否存在；显卡可用性、模型是否能加载和声音效果要继续实际验证。若提示找不到命令，先下载解压并手工复制两个文件，再运行检查。
+
+### 准备参考音频
+
+项目不分发 Saber 原声或声优录音。准备一段你有权使用的单人参考 WAV（建议 3—9 秒、无背景音乐），创建 `D:\saber-voice\references`，将文件复制为 `warm.wav`。记下音频中**实际说出的完整文字**及语言；下面 TOML 的文本仅作格式示例，必须换成这段音频的准确台词。音色相似度和中文口音取决于参考与模型，不能保证与角色完全一致。
+
+```powershell
+New-Item -ItemType Directory -Force D:\saber-voice\references | Out-Null
+# 在文件管理器中把已准备好的参考 WAV 复制到 D:\saber-voice\references\warm.wav
+```
 
 本机已部署 GPT-SoVITS v2ProPlus，使用参考音频直接合成，无需为每个句子重新训练。它不是已经训练完成的 Saber 专用模型。日语参考可能把日语发音习惯带进中文；当前方案采用普通话主参考约束发音、日语辅助参考保留部分音色。音色相似度、情绪和普通话自然度仍需试听判断，自动转写正确不能替代听感验收。
 
@@ -57,11 +79,12 @@ docker compose up -d --no-deps bot
 在 `config.toml` 的 `[voice]` 内设置以下字段；其他字段保留示例默认值。下面示例要求对应文件真实存在：
 
 ```toml
+enabled = true # 开启语音回复
 provider = "gpt_sovits" # 示例默认 edge；本地推理选 gpt_sovits
 voice = "warm" # 本地模式必须匹配 references 中的名称
 gpt_sovits_url = "http://host.docker.internal:9880" # 直接运行 Python 则用 http://127.0.0.1:9880
-references = { warm = { audio_path = "D:/saber-voice/references/chinese-anchor.wav", text = "我在呢。今天辛苦了，先歇一会儿吧。", language = "zh", aux_audio_paths = ["D:/saber-voice/references/warm.wav"] } }
-fallback_to_edge = true # 默认 true；本地合成失败尝试通用中文女声，并在日记标明回退
+references = { warm = { audio_path = "D:/saber-voice/references/warm.wav", text = "这里替换为参考音频实际说出的台词", language = "ja", aux_audio_paths = [] } }
+fallback_to_edge = false # 本地合成失败时回退文字，避免误以为通用女声是参考声线
 timeout_seconds = 90 # 示例默认25；本机为模型加载和推理留90秒
 max_bytes = 5242880 # 示例默认2097152；本机提高到5 MiB
 ```

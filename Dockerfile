@@ -6,5 +6,6 @@ RUN python -c "import tiktoken; tiktoken.get_encoding('cl100k_base'); tiktoken.g
 COPY bot.py chat.py settings.py storage.py reading.py stickers.py dashboard.py voice_call.py speech.py recognition.py continuity.py harness.py desktop_bridge.py ./
 COPY web ./web
 COPY assets ./assets
+COPY scripts/prepare_qq_call.py ./scripts/prepare_qq_call.py
 COPY LICENSE README.md ./
 CMD ["python", "bot.py"]

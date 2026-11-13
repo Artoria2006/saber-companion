@@ -17,5 +17,8 @@
 !web/**
 !assets/
 !assets/**
+!scripts/
+scripts/*
+!scripts/prepare_qq_call.py
 !LICENSE
 !README.md
